@@ -1,0 +1,24 @@
+{
+ "status": 200,
+ "headers": {
+  "cf-ai-neurons": "4.58"
+ },
+ "body": {
+  "result": {
+   "model": "clef",
+   "answers": {
+    "is_red": {
+     "type": "noul",
+     "noul": 0.9934
+    }
+   },
+   "usage": {
+    "input_tokens": 210,
+    "output_tokens": 0
+   }
+  },
+  "success": true,
+  "errors": [],
+  "messages": []
+ }
+}

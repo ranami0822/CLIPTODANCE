@@ -55,6 +55,7 @@ coords:                 # 座標の規約(案)。地上物は足元中央、空�
 
 judge:
   backend: cloudflare   # 将来 local(Clef の重みは Apache 2.0 で HF にある)に差し替え
+  model: clef           # clef | clef-flash(flash は約6分の1の消費。画像入力の精度は未確認)
   # 呼び出しは Workers AI REST。トークンは環境変数 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
   cache_path: data/judge_cache/judge.sqlite   # CachedJudge の SQLite
 estimator:

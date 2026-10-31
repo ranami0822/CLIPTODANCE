@@ -198,7 +198,16 @@ Clefは選択と採点を担当する判定モデル、Clairicは数値を出す
 
 - Clef: 質問の型は3種類。`noul`(はいの確率)、`choice`(選択肢ごとの確率と確信度)、`score`(順序付きの評価基準での確率重み付きスコアと各段階の確率)。1リクエストで最大 64 問。状態と一緒に最大4枚の画像を渡せる。
 - Clairic: テキストと最大4枚の画像から、名前と型を指定した項目(数値・日付・リスト・推定値)を埋め、各項目に確信度か80%範囲が付く。2026-10-19公開のプレビュー。
-- 呼び出し: Workers AIの REST API(`/ai/run/@cf/cloudflare/clef` 等)。トークンはWorkers AIのReadとEditが必要。PythonからはRESTで呼ぶ。質問の正確なリクエスト形式は実装前に公式ドキュメントで確認する。
+- 呼び出し: Workers AIの REST API。トークンはWorkers AIのReadとEditが必要。PythonからはRESTで呼ぶ。
+- **リクエスト形式(2026-10-31 に公式ドキュメントで確認し、合成データで実際に呼んで裏取り。`adapters/cloudflare.py` に実装済み)**:
+  - `POST https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/run/@cf/cloudflare/{clef|clef-flash|clairic}`、`Authorization: Bearer <token>`。応答は `{"result": {...}, "success", "errors": [{"code","message"}], "messages"}` に包まれる。
+  - Clef の body: `model`("clef" か "clef-flash")、`state`(**必須**。文字列か JSON。空文字は可で、省略すると 400)、`questions`(1〜64問。id は英数字と `_ . -` の100文字まで)、`images`(最大4枚)。質問は `noul`(`instructions`)、`choice`(`criteria` = 選択肢 id → 説明 or null。2〜255個)、`score`(`criteria` = 低い順の説明の配列。2〜10段階)。
+  - Clef の答え: `noul` → `{noul}`、`choice` → `{choice, probabilities, confidence}`、`score` → `{score, legend, probabilities, confidence}`。**score は 0 始まり**(最低段階 = 0。段階の間の値になる)。`probabilities` のキーは choice では選択肢 id、score では段階の番号の文字列。
+  - Clairic の body: `model`、`state`(文字列。画像があれば空でよい)、`fields`(項目名 → `type` と指定)、`images`(最大4枚)。型は text / number / date / time / datetime / duration / list / estimate / forecast。**estimate は `min` と `max` が必須**(`step`、`scale: "log"` も指定できる)で、`{value, mean, median, p10, p90, p_below, p_above}` を返す。p10〜p90 が設計書の「80%範囲」にあたる。入力から決まらない項目は `value: null`。
+  - 画像: base64 埋め込み(`{content_type, base64}` か data URL)のみ。PNG / JPEG / WebP、1枚 4 MiB・16 メガピクセルまで、合計 8 MiB まで。URL は不可。
+  - 画像のトークン数: 各辺を 32 の倍数に丸め、面積が約 65,000 px(256×256)未満なら拡大、約 1 メガピクセル超なら縮小。32×32 ごとに 1 トークン、1枚の上限 1,024 トークン。64×64 の画像は 256×256 に拡大され、64 トークン(実測)。
+  - 消費ニューロンは応答ヘッダ `cf-ai-neurons` に入る(本文の `usage` はトークン数のみ)。Clef は出力トークンを課金しない。
+  - エラー: 3036 (429) = 1日の無料枠を使い切った、3040 (429) = 一時的な容量不足、5006 (400) = 入力の形が不正(実測)、3006 (413) = 大きすぎる。
 
 用途と質問設計(案):
 
@@ -216,7 +225,13 @@ Clefは選択と採点を担当する判定モデル、Clairicは数値を出す
 
 呼び出し予算の方針(案):
 
-- 無料枠は全モデル共通の1日10,000ニューロン(00:00 UTCリセット)。ClefとClairicの1回あたりの消費と、プレビューのモデルが枠の対象かは未確認。M0で実測する。
+- 無料枠は全モデル共通の1日10,000ニューロン(00:00 UTCリセット)。**実測と公式の料金表(2026-10-31)**:
+  - Clef: 21,818 ニューロン/M 入力トークン($0.24/M)。Clef-flash: 3,455(約6分の1)。Clairic: 9,091($0.10/M)。
+  - 実測: Clef 326 トークンで 7.11、64×64 画像1枚+質問1問(210 トークン)で 4.58。Clairic 325 トークンで 2.95、226 トークンで 2.05。料金表の単価と一致した。
+  - 目安: 326 トークンの Clef 呼び出しなら、1日に約1,400回。M1 の約200枚を、画像1枚 + 質問10問ほど(約1,300トークン、約28ニューロン)で判定すると、約5,700ニューロンで、1日の無料枠に収まる見込み(質問数に依存)。
+  - 未確認: プレビューの Clairic の消費が1日の無料枠に数えられるか(ヘッダには消費が出る。ダッシュボードで確認する)。
+  - レート制限: Text Generation の区分は 300 リクエスト/分(制限のページ。Clef がこの区分かは推定)。
+  - 公式の速度: Clef の遅延は中央値 209 ms、Clef-flash は 38.8 ms。実測した往復は 0.4〜1.1 秒。
 - 結果は(画像ハッシュ, 質問セットとモデルの版)をキーにキャッシュする。事前判定は最初の1回だけ。
 - 1リクエストに質問をまとめる(最大 64 問)。実行時の遅延重視の箇所はClef-flashを検討するが、画像入力に対応するかは未確認。
 - 枠を超えたときは、CLIPのスコアと機械的指標だけで動く縮退モードに落とす。
@@ -225,13 +240,14 @@ Clefは選択と採点を担当する判定モデル、Clairicは数値を出す
 
 実装の境界(2026-10-31 作り直し。`adapters/` に実装済み):
 
-- `Judge.ask(questions, images, context)` は、質問を**まとめて**受けて、渡した順の結果と使用量(`Usage`: API 呼び出し数・キャッシュ命中数・ニューロン消費・遅延)を返す。上限(質問数・画像数)は抽象側でなく、実装ごとの `capabilities` が持つ(Clef は 64 問・4 枚)。上限を超える質問数は `ask_in_chunks` が分けて送る。
+- `Judge.ask(questions, images, state)` は、質問を**まとめて**受けて、渡した順の結果と使用量(`Usage`: API 呼び出し数・キャッシュ命中数・ニューロン消費・遅延)を返す。上限(質問数・画像数)は抽象側でなく、実装ごとの `capabilities` が持つ(Clef は 64 問・4 枚)。上限を超える質問数は `ask_in_chunks` が分けて送る。
 - 結果の型は `NoulResult` / `ChoiceResult` / `ScoreResult`。すべて `question_id` と `cached` を持つ。
-- キャッシュは `CachedJudge`(SQLite)。キー = (画像のハッシュ, 正規化した質問, model_id, context)。質問の `id` はキーに入れない。命中しない質問だけを中身に尋ねる。失敗はキャッシュしない。
+- キャッシュは `CachedJudge`(SQLite)。キー = (画像のハッシュ, 正規化した質問, model_id, state)。質問の `id` はキーに入れない。命中しない質問だけを中身に尋ねる。失敗はキャッシュしない。
 - 失敗は例外(`InvalidRequest` / `BudgetExceeded` / `RateLimited` / `ApiError`)で返す。縮退モードは設けないので、握りつぶして代わりの値を返さない。
-- `Estimator.estimate(text, fields, images, context)` は、項目に型・単位・範囲(`EstimateField`)を持たせ、値と確信度・80%範囲(`EstimateValue`)を返す。
+- `Estimator.estimate(text, fields, images)` は、項目に型・単位・範囲(`EstimateField`)を持たせ、値と確信度・80%範囲(`EstimateValue`)を返す。
 - `FakeJudge` が外部通信なしで Clef と同じ上限の検査をする。テストと、パイプライン側の開発に使う。
-- 未決: Clef の「状態」(`context`)の形式、透明部分のある切り抜きを何色で埋めて渡すか、`ScoreResult` の段階ラベルと数値(1〜5)の対応。いずれも公式ドキュメントの確認後に決める。
+- 解決済み(2026-10-31): `state` は文字列か JSON(空文字可)。`ScoreResult.score` は 0 始まり(5段階なら 0〜4)で、質問の「縁のきれいさ 1–5」は 5段階の説明を渡し、結果を 0〜4 として扱う。
+- 未決: 透明部分のある切り抜きを何色で埋めて渡すか(PNG のまま渡したときの Clef の見え方は未検証)。
 - 「ローカル CLIP に差し替えられる」は、`Judge`(質問に答える形)の単位では成り立たない。差し替えは、工程単位(配置・属性付け・採点)のインターフェースを切ったうえで行う(次の作業)。
 
 ## パッチ選択
@@ -311,7 +327,7 @@ Paint by Exampleの土台がStable Diffusion v1.4と古い点は品質面の限�
 
 各段階に「次へ進む条件(ゲート)」を置く。ゲートの数値はすべて初期の案で、結果を見て見直す。
 
-1. M0 環境と基準: リポジトリ構成(案: `pipeline/` `adapters/` `data/` `scripts/`)、設定ファイル、Judge/Estimatorのインターフェースを作る。Colabで Arnheim 3 をサンプルパッチで動かし、基準の出力と速度を記録する。ClefとClairicの1回あたりの消費ニューロンを実測する。ゲート: ClefとClairicをRESTで呼び、画像1枚に対する結果をログに残せる。
+1. M0 環境と基準: リポジトリ構成(案: `pipeline/` `adapters/` `data/` `scripts/`)、設定ファイル、Judge/Estimatorのインターフェースを作る。Colabで Arnheim 3 をサンプルパッチで動かし、基準の出力と速度を記録する。ClefとClairicの1回あたりの消費ニューロンを実測する。ゲート: ClefとClairicをRESTで呼び、画像1枚に対する結果をログに残せる。(2026-10-31 に合成データで達成。`scripts/m0_probe.py` がログを `data/logs/` に残す。Colab での Arnheim 3 の実行は未実施。)
 2. M1 素材プール: 1プール(例: 美術館のオープンアクセス絵画)約200枚を取り込み、埋め込み、SAM切り抜き、Clef属性判定、DB登録を行う。ゲート: 目視で切り抜きの良し悪しを確認し、属性判定と自分の判断がどの程度一致するかを数値化する(一致率の目安 80%以上を案)。
 3. M2 パッチ選択: 要素分解、検索、足切り、組み合わせ選択を実装し、要望文ごとに上位候補を一覧(コンタクトシート)で確認できるようにする。ゲート: 10件の要望で、上位3組のうち少なくとも1組が自分から見て「使える」。
 4. M3 配置と合成: 最初に位置推定の検証実験を行う。位置が既知の合成画像(物体を決めた座標に貼ったもの)を数十枚作り、Clairicの推定値と真の座標の相関(Spearman)と誤差を見る。相関が低ければ、格子候補をClefで選ぶ方式に切り替える。その後、変形・重ね順・なじませを実装する。ゲート: 相関の目安 0.7以上を案とするか、代替方式で同等の精度が出ること。
@@ -327,9 +343,9 @@ Paint by Exampleの土台がStable Diffusion v1.4と古い点は品質面の限�
 | Clairicの位置推定の精度 | 想定されている用途は書類からの抽出や推定で、画像上の「自然な配置」をどこまで出せるかは不明 | M3の合成画像による相関実験 |
 | Clefの空間判断(向き・光)の精度 | 未検証 | M1のゲートで自分の判断との一致率を測る |
 | 地平線 `y_h` の自動推定の精度 | OpenCV の軽い処理でスカイライン由来の初期値を出す。山・森などでは消失線とずれる見込み(R3a) | M1で推定値と目視修正後の値の誤差を測り、直す手間を見る |
-| 無料枠の対象と消費量 | 無料枠は「非ベータのモデル」対象という記述があり、Clairicはプレビュー。ニューロン消費量も不明 | M0で実測し、ダッシュボードと公式料金ページを確認 |
+| 無料枠の対象と消費量 | 消費量は実測済み(上記)。プレビューの Clairic が無料枠に数えられるかは未確認 | ダッシュボードで確認 |
 | Clairicのプレビュー依存 | 仕様変更や停止の可能性。オープンウェイトは公開時期未定 | Estimatorをadapterで分離し、格子候補+Clef採点の代替方式を用意 |
-| Clef-flashの画像入力 | 公式ページはClef本体のみ画像対応を記載 | 公式ドキュメントで確認 |
+| Clef-flashの画像入力 | 公式ページに Vision: Yes・images 最大4枚とある(2026-10-31)。実際に画像を渡す呼び出しは未実施 | 実素材で試す |
 | Sketch2Photoのフィルタ基準 | 論文本文で確認済み(2026-10-31)。論文の画像サイズは未確認 | パッチ選択に反映済み。数値はM2で調整 |
 | CLIP-CLOPの初期値注入 | 初期化を外から差し替えられるか未確認 | `collage_generator.py` と `training.py` を読む |
 | Paint by Exampleのライセンスと古さ | ライセンスは「other」表示、土台はSD v1.4 | 製品利用前にLICENSEを読み、新しい代替を調査 |
@@ -356,6 +372,12 @@ Paint by Exampleの土台がStable Diffusion v1.4と古い点は品質面の限�
 - [Paint by Example(diffusers文書)](https://huggingface.co/docs/diffusers/main/en/api/pipelines/paint_by_example)、[公開リポジトリ](https://github.com/Fantasy-Studio/Paint-by-Example)
 - [Clairic モデル概要(ai-tldr)](https://ai-tldr.dev/models/clairic/)、[Clairic 公式更新情報](https://developers.cloudflare.com/changelog/post/2026-10-19-clairic-workers-ai/)
 - [Workers AI 料金](https://developers.cloudflare.com/workers-ai/platform/pricing/)
+
+Cloudflare の公式ドキュメント(2026-10-31 に本文を取得して確認):
+
+- [clef](https://developers.cloudflare.com/workers-ai/models/clef/)、[clef-flash](https://developers.cloudflare.com/workers-ai/models/clef-flash/)、[clairic](https://developers.cloudflare.com/workers-ai/models/clairic/)(各ページと入出力スキーマ JSON)
+- [Errors](https://developers.cloudflare.com/workers-ai/platform/errors/)、[Limits](https://developers.cloudflare.com/workers-ai/platform/limits/)、[Pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)、[REST API](https://developers.cloudflare.com/workers-ai/get-started/rest-api/)
+- Clef / Clef-flash の重みは Apache 2.0 で Hugging Face に公開(更新情報の記述)。Clairic は「近く公開する予定」で、プレビュー中。
 
 2026-10-31 の追加調査(本文を取り出して確認):
 
@@ -408,6 +430,7 @@ Paint by Exampleの土台がStable Diffusion v1.4と古い点は品質面の限�
 
 ## 変更履歴
 
+- 2026-10-31: Cloudflare のリクエスト形式を公式ドキュメントで確認し、合成データで実際に呼んで裏取り。`CloudflareJudge` / `CloudflareEstimator` を実装(M0 のゲートのうち REST 呼び出しとログは達成)。score は 0 始まり、消費ニューロンはヘッダ、state は空文字可。
 - 2026-10-31: `Judge` / `Estimator` を作り直し(まとめ送信・上限の分離・使用量・例外・キャッシュ・テスト)。
 - 2026-10-31: R7 の三分割と主役の高さを「目安」とし、規則の検査には使わないと決定(R2a との衝突の解決)。
 - 2026-10-31: 未調査分(配置モデル・LLMレイアウト・構図・なじませ・AutoCollage・CLIPの限界)を調べ、採否を決定。採用: 実寸の種類別表、色分布の距離、Reinhard色補正、評価の限定。保留: TopNet/FOPA、LayoutGPT型、Deep Painterly Harmonization。

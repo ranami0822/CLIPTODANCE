@@ -1,0 +1,55 @@
+{
+ "status": 200,
+ "headers": {
+  "cf-ai-neurons": "2.95"
+ },
+ "body": {
+  "result": {
+   "model": "clairic",
+   "answers": {
+    "x": {
+     "type": "estimate",
+     "value": 0.81,
+     "mean": 0.8051194189154807,
+     "median": 0.83,
+     "p10": 0.71,
+     "p90": 0.88,
+     "p_below": 1.4071747500565834e-07,
+     "p_above": 3.648510187304055e-07
+    },
+    "scale_mult": {
+     "type": "estimate",
+     "value": 0.75,
+     "mean": 0.7322126737683684,
+     "median": 0.7,
+     "p10": 0.55,
+     "p90": 0.95,
+     "p_below": 0.0002895838115364313,
+     "p_above": 2.2845710191177204e-05
+    },
+    "height_m": {
+     "type": "estimate",
+     "value": 7,
+     "mean": 6.908774100345358,
+     "median": 7,
+     "p10": 4,
+     "p90": 9.5,
+     "p_below": 5.178239462111378e-06,
+     "p_above": 2.608260956549202e-06
+    }
+   },
+   "truncated": false,
+   "usage": {
+    "state_tokens": 21,
+    "image_tokens": 0,
+    "schema_tokens": 304,
+    "input_tokens": 325,
+    "output_tokens": 0,
+    "passes": 1
+   }
+  },
+  "success": true,
+  "errors": [],
+  "messages": []
+ }
+}

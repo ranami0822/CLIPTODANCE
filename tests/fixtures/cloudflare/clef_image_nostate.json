@@ -1,0 +1,15 @@
+{
+ "status": 400,
+ "headers": {},
+ "body": {
+  "errors": [
+   {
+    "message": "AiError: Bad input: Error: required properties at '/' are 'model,state,questions' (ddd87bc2-d68e-443b-a970-a0e3957c7e40)",
+    "code": 5006
+   }
+  ],
+  "success": false,
+  "result": {},
+  "messages": []
+ }
+}

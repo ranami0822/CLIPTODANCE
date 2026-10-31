@@ -1,0 +1,51 @@
+{
+ "status": 200,
+ "headers": {
+  "cf-ai-neurons": "7.11"
+ },
+ "body": {
+  "result": {
+   "model": "clef",
+   "answers": {
+    "has_tree": {
+     "type": "noul",
+     "noul": 0.9918
+    },
+    "tree_side": {
+     "type": "choice",
+     "choice": "right",
+     "probabilities": {
+      "left": 0.0049,
+      "right": 0.9892,
+      "center": 0.0059
+     },
+     "confidence": 0.9679
+    },
+    "sunny": {
+     "type": "score",
+     "score": 2.5942,
+     "legend": {
+      "0": "dark",
+      "1": "cloudy",
+      "2": "bright",
+      "3": "very bright"
+     },
+     "probabilities": {
+      "0": 0.0089,
+      "1": 0.0137,
+      "2": 0.3516,
+      "3": 0.6258
+     },
+     "confidence": 0.354
+    }
+   },
+   "usage": {
+    "input_tokens": 326,
+    "output_tokens": 0
+   }
+  },
+  "success": true,
+  "errors": [],
+  "messages": []
+ }
+}

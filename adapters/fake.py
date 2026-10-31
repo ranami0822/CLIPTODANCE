@@ -18,6 +18,7 @@ from .base import (
     Question,
     QuestionKind,
     ScoreResult,
+    State,
     Usage,
     check_capabilities,
     validate_batch,
@@ -40,7 +41,7 @@ class FakeJudge:
         self.calls: list[list[Question]] = []  # 実際に受けた呼び出しごとの質問
 
     def ask(
-        self, questions: Sequence[Question], images: Sequence[ImageInput] = (), context: str = ""
+        self, questions: Sequence[Question], images: Sequence[ImageInput] = (), state: State = ""
     ) -> JudgeResponse:
         validate_batch(questions)
         check_capabilities(self.capabilities, len(questions), len(images))

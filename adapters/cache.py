@@ -1,6 +1,6 @@
 """判断結果のキャッシュ(SQLite)。
 
-キー = sha256(model_id, 正規化した質問, 画像ごとのハッシュ(順序つき), context)。
+キー = sha256(model_id, 正規化した質問, 画像ごとのハッシュ(順序つき), state)。
 質問の id はキーに入れない。同じ質問・同じ画像なら、id が違っても同じ結果を返す。
 失敗(例外)はキャッシュしない。
 """
@@ -22,6 +22,7 @@ from .base import (
     JudgeResponse,
     JudgeResult,
     Question,
+    State,
     Usage,
     ask_in_chunks,
     image_digest,
@@ -50,9 +51,9 @@ class CachedJudge:
     def close(self) -> None:
         self._db.close()
 
-    def _key(self, question: Question, image_hashes: Sequence[str], context: str) -> str:
+    def _key(self, question: Question, image_hashes: Sequence[str], state: State) -> str:
         raw = json.dumps(
-            {"model": self.model_id, "q": question.canonical(), "images": list(image_hashes), "context": context},
+            {"model": self.model_id, "q": question.canonical(), "images": list(image_hashes), "state": state},
             ensure_ascii=False, sort_keys=True,
         )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -72,11 +73,11 @@ class CachedJudge:
         )
 
     def ask(
-        self, questions: Sequence[Question], images: Sequence[ImageInput] = (), context: str = ""
+        self, questions: Sequence[Question], images: Sequence[ImageInput] = (), state: State = ""
     ) -> JudgeResponse:
         validate_batch(questions)
         hashes = [image_digest(img) for img in images]
-        keys = [self._key(q, hashes, context) for q in questions]
+        keys = [self._key(q, hashes, state) for q in questions]
 
         found: dict[int, JudgeResult] = {}
         for i, (q, key) in enumerate(zip(questions, keys)):
@@ -87,7 +88,7 @@ class CachedJudge:
         miss_idx = [i for i in range(len(questions)) if i not in found]
         usage = Usage(cache_hits=len(found))
         if miss_idx:
-            resp = ask_in_chunks(self._inner, [questions[i] for i in miss_idx], images, context)
+            resp = ask_in_chunks(self._inner, [questions[i] for i in miss_idx], images, state)
             usage = usage + resp.usage
             for i, result in zip(miss_idx, resp.results):
                 found[i] = result

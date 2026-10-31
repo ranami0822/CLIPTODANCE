@@ -8,7 +8,7 @@ docs/design.md「ClefとClairicの使い方」参照。画素処理(SAM/OpenCV)�
 - 上限(質問数・画像数)は実装ごとの `capabilities` が持つ。抽象側に Cloudflare 固有の定数を置かない。
 - 結果には、どのモデルか・キャッシュか・消費量(分かれば)を付ける。ログと予算管理に使う。
 - 失敗は例外で返す。規則だけの縮退モードは設けない(設計書 R10)ので、握りつぶして代わりの値を返さない。
-- キャッシュキーは (画像のハッシュ, 正規化した質問, model_id, context)。質問の `id` はキーに入れない。
+- キャッシュキーは (画像のハッシュ, 正規化した質問, model_id, state)。質問の `id` はキーに入れない。
 """
 from __future__ import annotations
 
@@ -22,6 +22,9 @@ from typing import Protocol, Sequence, Union, runtime_checkable
 # 画像の渡し方: ファイルのパス、またはメモリ上のバイト列(PNG/JPEG のエンコード済みデータ)。
 # 透明部分を持つ切り抜きを、何色で埋めて渡すかは呼び出し側が決める(設計書の未決事項)。
 ImageInput = Union[Path, str, bytes]
+
+# 判断の入力(Clef の `state`)。文字列、または JSON にできる構造(辞書・リスト)。空文字でもよい(実測で確認)。
+State = Union[str, dict, list]
 
 
 # ---------------------------------------------------------------- 例外
@@ -63,6 +66,8 @@ class Usage:
     cache_hits: int = 0
     neurons: float | None = None
     latency_s: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     def __add__(self, other: "Usage") -> "Usage":
         if self.neurons is None and other.neurons is None:
@@ -74,6 +79,8 @@ class Usage:
             cache_hits=self.cache_hits + other.cache_hits,
             neurons=neurons,
             latency_s=self.latency_s + other.latency_s,
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
         )
 
 
@@ -91,8 +98,9 @@ class Question:
     id: str
     kind: QuestionKind
     text: str
-    options: tuple[str, ...] = ()  # CHOICE の選択肢
-    scale: tuple[str, ...] = ()    # SCORE の評価基準(低い順)
+    options: tuple[str, ...] = ()  # CHOICE の選択肢(id)
+    notes: tuple[str, ...] = ()    # CHOICE の選択肢ごとの説明(options と同じ長さ。空文字は説明なし)
+    scale: tuple[str, ...] = ()    # SCORE の評価基準の説明(低い順。0 始まりの段階になる)
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -102,8 +110,10 @@ class Question:
         if self.kind is QuestionKind.CHOICE:
             if len(self.options) < 2 or len(set(self.options)) != len(self.options):
                 raise InvalidRequest(f"質問 {self.id!r}: choice の選択肢は重複なしで2つ以上必要")
-        elif self.options:
-            raise InvalidRequest(f"質問 {self.id!r}: options は choice のときだけ指定できる")
+            if self.notes and len(self.notes) != len(self.options):
+                raise InvalidRequest(f"質問 {self.id!r}: notes は options と同じ長さにする")
+        elif self.options or self.notes:
+            raise InvalidRequest(f"質問 {self.id!r}: options / notes は choice のときだけ指定できる")
         if self.kind is QuestionKind.SCORE:
             if len(self.scale) < 2 or len(set(self.scale)) != len(self.scale):
                 raise InvalidRequest(f"質問 {self.id!r}: score の評価基準は重複なしで2段階以上必要")
@@ -113,7 +123,8 @@ class Question:
     def canonical(self) -> str:
         """キャッシュキー用の正規化した文字列。`id` は含めない。"""
         return json.dumps(
-            {"kind": self.kind.value, "text": self.text, "options": list(self.options), "scale": list(self.scale)},
+            {"kind": self.kind.value, "text": self.text, "options": list(self.options),
+             "notes": list(self.notes), "scale": list(self.scale)},
             ensure_ascii=False, sort_keys=True,
         )
 
@@ -122,8 +133,8 @@ def noul(id: str, text: str) -> Question:
     return Question(id=id, kind=QuestionKind.NOUL, text=text)
 
 
-def choice(id: str, text: str, options: Sequence[str]) -> Question:
-    return Question(id=id, kind=QuestionKind.CHOICE, text=text, options=tuple(options))
+def choice(id: str, text: str, options: Sequence[str], notes: Sequence[str] = ()) -> Question:
+    return Question(id=id, kind=QuestionKind.CHOICE, text=text, options=tuple(options), notes=tuple(notes))
 
 
 def score(id: str, text: str, scale: Sequence[str]) -> Question:
@@ -148,13 +159,23 @@ class ChoiceResult:
     confidence: float | None = None
     cached: bool = False
 
+    @property
+    def top(self) -> str:
+        """最も確率の高い選択肢。"""
+        return max(self.probs, key=self.probs.get)
+
 
 @dataclass(frozen=True)
 class ScoreResult:
-    """順序付き評価基準での確率重み付きスコアと各段階の確率。"""
+    """順序付き評価基準での確率重み付きスコアと各段階の確率。
+
+    `score` は **0 始まり**(最低段階 = 0。段階の間の値にもなる)。5段階なら 0〜4。
+    `level_probs` のキーは、質問の `scale` の説明文。
+    """
     question_id: str
     score: float
     level_probs: dict[str, float]
+    confidence: float | None = None
     cached: bool = False
 
 
@@ -194,7 +215,7 @@ class Judge(Protocol):
     capabilities: JudgeCapabilities
 
     def ask(
-        self, questions: Sequence[Question], images: Sequence[ImageInput] = (), context: str = ""
+        self, questions: Sequence[Question], images: Sequence[ImageInput] = (), state: State = ""
     ) -> JudgeResponse: ...
 
 
@@ -220,7 +241,7 @@ def image_digest(image: ImageInput) -> str:
 
 
 def ask_in_chunks(
-    judge: Judge, questions: Sequence[Question], images: Sequence[ImageInput] = (), context: str = ""
+    judge: Judge, questions: Sequence[Question], images: Sequence[ImageInput] = (), state: State = ""
 ) -> JudgeResponse:
     """質問数が `capabilities.max_questions` を超えるとき、分けて送って結果と使用量を合わせる。"""
     validate_batch(questions)
@@ -231,7 +252,7 @@ def ask_in_chunks(
     results: list[JudgeResult] = []
     usage = Usage()
     for i in range(0, len(questions), size):
-        resp = judge.ask(questions[i:i + size], images, context)
+        resp = judge.ask(questions[i:i + size], images, state)
         results.extend(resp.results)
         usage = usage + resp.usage
     return JudgeResponse(results=tuple(results), usage=usage, model_id=judge.model_id)
@@ -240,29 +261,45 @@ def ask_in_chunks(
 # ---------------------------------------------------------------- 推定(Clairic)
 
 class FieldKind(str, Enum):
+    """Clairic の項目の型(公式スキーマの type の一部)。"""
+    TEXT = "text"
     NUMBER = "number"
     DATE = "date"
     LIST = "list"
-    ESTIMATE = "estimate"  # 値と範囲を返す推定値(Clairic の型名は実装時に公式文書で確認)
+    ESTIMATE = "estimate"  # 値と 80% 範囲(p10〜p90)を返す。min / max が必須
 
 
 @dataclass(frozen=True)
 class EstimateField:
-    """Estimator に埋めさせる項目。単位と範囲を書いて、座標の規約などを伝える。"""
+    """Estimator に埋めさせる項目。単位と範囲を書いて、座標の規約などを伝える。
+
+    ESTIMATE は `minimum` と `maximum` が必須(Clairic が格子を作るため)。`step` は格子の刻み。
+    `log_scale` は対数目盛り(倍率のような量に向く)。
+    """
     name: str
     kind: FieldKind
-    description: str = ""
+    instructions: str = ""
     unit: str | None = None
     minimum: float | None = None
     maximum: float | None = None
+    step: float | None = None
+    log_scale: bool = False
+    integer: bool = False
+    decimals: int | None = None
+    items: str | None = None  # LIST の要素の型: "text" | "number" | "date"
 
 
 @dataclass(frozen=True)
 class EstimateValue:
+    """`value` は ESTIMATE では中央値付近の代表値。入力から決まらないときは None。
+    `range80` は (p10, p90)。ESTIMATE 以外では None。"""
     name: str
     value: object
     confidence: float | None = None
+    median: float | None = None
+    mean: float | None = None
     range80: tuple[float, float] | None = None
+    p_null: float | None = None
 
 
 @dataclass(frozen=True)
@@ -284,5 +321,4 @@ class Estimator(Protocol):
         text: str,
         fields: Sequence[EstimateField],
         images: Sequence[ImageInput] = (),
-        context: str = "",
     ) -> EstimateResponse: ...

@@ -10,14 +10,15 @@
 | --- | --- |
 | `docs/design.md` | 設計方針(草案) |
 | `pipeline/` | パイプライン本体(M1 以降で追加) |
-| `adapters/` | 判断モデルの差し替え層。`Judge`(Clef 相当)/ `Estimator`(Clairic 相当)のインターフェース、`CachedJudge`(SQLite キャッシュ)、`FakeJudge`(テスト用)。Cloudflare 実装は未実装 |
+| `adapters/` | 判断モデルの差し替え層。`Judge`(Clef 相当)/ `Estimator`(Clairic 相当)のインターフェース、`CachedJudge`(SQLite キャッシュ)、`FakeJudge`(テスト用)、Cloudflare 実装(Clef / Clairic) |
 | `configs/default.yaml` | 設定。数値は設計書の仮置き |
 | `data/` | 素材・索引・キャッシュ(git 管理外) |
 | `scripts/` | 取り込み・実験スクリプト |
 
 ## 現状
 
-- インターフェース・キャッシュ・テスト用の偽実装まで。Cloudflare 実装は、リクエスト形式を公式ドキュメントで確認するまで `NotImplementedError`。
+- 判断側(Clef / Clairic)のアダプタまで実装済み。合成データで実際の API を呼んで確認した。
+- 実際の API を呼ぶ確認: `python scripts/m0_probe.py`(数ニューロン消費。要 `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`)、`CLIPTODANCE_LIVE=1 pytest tests/test_cloudflare_live.py`。
 - 重い依存(torch / CLIP / SAM / FAISS)は本番(GPU・Colab)で M1 から追加する。
 
 ## 開発

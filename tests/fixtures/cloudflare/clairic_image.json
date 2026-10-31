@@ -1,0 +1,35 @@
+{
+ "status": 200,
+ "headers": {
+  "cf-ai-neurons": "2.05"
+ },
+ "body": {
+  "result": {
+   "model": "clairic",
+   "answers": {
+    "red_fraction": {
+     "type": "estimate",
+     "value": 1,
+     "mean": 0.978089941440418,
+     "median": 1,
+     "p10": 0.95,
+     "p90": 1,
+     "p_below": 1.0607324156808318e-06,
+     "p_above": 8.618575520813465e-06
+    }
+   },
+   "truncated": false,
+   "usage": {
+    "state_tokens": 0,
+    "image_tokens": 64,
+    "schema_tokens": 162,
+    "input_tokens": 226,
+    "output_tokens": 0,
+    "passes": 1
+   }
+  },
+  "success": true,
+  "errors": [],
+  "messages": []
+ }
+}

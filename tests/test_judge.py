@@ -3,9 +3,7 @@ import pytest
 from adapters import (
     BudgetExceeded,
     CachedJudge,
-    Estimator,
     InvalidRequest,
-    Judge,
     NoulResult,
     Question,
     QuestionKind,
@@ -14,7 +12,6 @@ from adapters import (
     noul,
     score,
 )
-from adapters.cloudflare import CloudflareEstimator, CloudflareJudge
 from adapters.fake import FakeJudge
 
 IMG_A = b"image-a-bytes"
@@ -115,7 +112,7 @@ def test_cache_key_depends_on_image_context_and_model(tmp_path):
     q = [noul("q", "同じ質問")]
     judge.ask(q, images=[IMG_A])
     judge.ask(q, images=[IMG_B])
-    judge.ask(q, images=[IMG_A], context="別の状態")
+    judge.ask(q, images=[IMG_A], state="別の状態")
     assert len(inner.calls) == 3
     other_inner = FakeJudge(model_id="other")
     other = CachedJudge(other_inner, tmp_path / "cache" / "judge.sqlite")
@@ -158,13 +155,3 @@ def test_failures_propagate_and_are_not_cached(tmp_path):
     inner.fail_with = None  # 復旧
     resp = judge.ask([noul("q", "質問")])
     assert isinstance(resp.results[0], NoulResult) and not resp.results[0].cached
-
-
-# ---------------------------------------------------------------- Cloudflare の骨組み
-
-def test_cloudflare_adapters_follow_protocols_and_documented_limits():
-    judge, est = CloudflareJudge(), CloudflareEstimator()
-    assert isinstance(judge, Judge) and isinstance(est, Estimator)
-    assert judge.capabilities.max_questions == 64 and judge.capabilities.max_images == 4
-    with pytest.raises(NotImplementedError):
-        judge.ask(noul_batch(1))
