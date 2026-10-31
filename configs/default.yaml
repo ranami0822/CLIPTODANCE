@@ -29,14 +29,19 @@ landscape:              # docs/design.md「風景ルール」。R1-R3 は決定�
     method: opencv_light         # 決定。スカイライン由来の初期値(軽い処理)。目視で直す前提
   placement:                     # 決定(R10): Clairic が提案し、規則が補正する
     mode: propose_then_correct   # 規則だけの縮退モードは設けない
-    estimator_fields: [x, y_foot, scale_mult, rotation, height_m]
+    estimator_fields: [x, y_foot, scale_mult, rotation]   # height_m は表にない種類のときだけ追加で尋ねる
+    height_table: configs/height_table.yaml               # 決定: 実寸は種類別の表(平均と幅)
     scale_mult_range: [0.5, 2.0]   # 案
     rotation_range_deg: [-15, 15]  # 案
   camera_height_m: 1.6           # 案(R5)
   main_height_ratio: [0.25, 0.60]  # 案(R7) 地上の主役の高さ/画面高さ
   max_overlap_ratio: 0.30        # 案(R8)
   allow_out_of_canvas: false     # 案(R8)
-  color_shift_strength: 0.2      # 案(R9)
+  color_transfer:                # 決定(R9): Reinhard 2001(lαβ の平均・標準偏差を転送)
+    method: reinhard_lab
+    strength: 0.2                # 案。0〜1
+    reference: local_context      # 配置位置の周辺の領域と合わせる
+  compat_color_distance: chi2_lab_hist   # 決定: 素材の元画像と土台の Lab ヒストグラムの χ² 距離を相性に加える
 
 coords:                 # 座標の規約(案)。地上物は足元中央、空中物は中心
   xy: normalized_0_1    # キャンバス幅・高さに対する 0-1、上が y=0

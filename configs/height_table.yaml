@@ -1,0 +1,23 @@
+# 物の実寸の高さの表(R5)。docs/design.md「風景ルール」「採否の決定」参照。
+# Photo Clip Art は種類ごとの高さ分布をデータから推定して使う。こちらは手で作る。
+# 値は単位 m。mean = 平均、sd = 標準偏差(幅)。
+# 下の値はすべて「仮置き」で、私の一般的な目安。出典はない。使う前に確かめて、
+# 確かめた値は source に出典を書く(source が placeholder のままのものは未確認)。
+# 表にない種類は、実行時に Clairic が実寸を提案する(設計書 R10)。
+entries:
+  person:
+    mean: 1.7
+    sd: 0.1
+    source: placeholder
+  dog:
+    mean: 0.5
+    sd: 0.15
+    source: placeholder
+  tree:
+    mean: 8.0
+    sd: 4.0
+    source: placeholder
+  house:
+    mean: 6.0
+    sd: 2.0
+    source: placeholder
