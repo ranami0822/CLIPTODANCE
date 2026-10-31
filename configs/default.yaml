@@ -27,6 +27,11 @@ landscape:              # docs/design.md「風景ルール」。R1-R3 は決定�
     pool_assets: estimate_then_review   # 取り込み時に推定し、目視で確認・修正
     user_background: estimate_then_confirm  # 実行時に推定し、確認画面で修正
     method: null                 # 未定。M1 で当たり具合を測って選ぶ
+  placement:                     # 決定(R10): Clairic が提案し、規則が補正する
+    mode: propose_then_correct   # フォールバック: rules_only(縮退モード)
+    estimator_fields: [x, y_foot, scale_mult, rotation, height_m]
+    scale_mult_range: [0.5, 2.0]   # 案
+    rotation_range_deg: [-15, 15]  # 案
   camera_height_m: 1.6           # 案(R5)
   main_height_ratio: [0.25, 0.60]  # 案(R7) 地上の主役の高さ/画面高さ
   max_overlap_ratio: 0.30        # 案(R8)
