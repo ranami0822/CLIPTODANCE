@@ -288,3 +288,69 @@ def test_cached_judge_can_be_used_from_several_threads(tmp_path):
         return cj.ask([noul("q", f"question {n % 5}")], images=[], state="").results[0].p_yes
     with ThreadPoolExecutor(6) as ex:
         assert list(ex.map(go, range(40))) == [0.5] * 40
+
+
+# ---------------------------------------------------------------- 尋ねる順(要因として入れ替えられる)
+
+def order_scene():
+    return [inst("cloud", "cloud", airborne=True), inst("boat", "boat", "water"), inst("tree", "tree", "land"), inst("horse", "horse", "land", role="main")]
+
+
+def order_of(mode, seed=0):
+    insts = order_scene()
+    return [insts[n].id for n in SequentialClairicPlacer(FakeEstimator(), order=mode, seed=seed).order(insts, canvas_info())]
+
+
+def test_order_modes():
+    assert order_of("main_first") == ["horse", "boat", "tree", "cloud"]
+    assert order_of("reverse") == ["cloud", "tree", "boat", "horse"]
+    back = order_of("back_to_front")
+    assert back[0] == "cloud" and back[-1] == "horse"                              # 空 → 奥 → 手前(主役は最後)
+    assert order_of("front_to_back") == back[::-1]
+    r0, r0b, r1 = order_of("random", 0), order_of("random", 0), order_of("random", 1)
+    assert r0 == r0b and sorted(r0) == sorted(order_of("main_first"))              # 同じ seed なら同じ順、全要素が 1 回ずつ
+    assert any(order_of("random", s) != r0 for s in range(2, 8))                   # seed で変わる
+
+
+def test_unknown_order_is_rejected():
+    with pytest.raises(ValueError):
+        SequentialClairicPlacer(FakeEstimator(), order="sideways")
+
+
+def test_the_order_is_really_used_for_the_calls_and_the_result_keeps_the_instance_order():
+    insts = order_scene()
+    est = FakeEstimator()
+    out = SequentialClairicPlacer(est, order="back_to_front").place("r", insts, canvas_info(), b"", context(insts))
+    called = [c["fields"][0].name.rsplit("_", 1)[0] for c in est.calls]
+    assert called == order_of("back_to_front") and len(out) == 4
+
+
+def test_trace_keeps_the_proposal_before_the_habitat_correction():
+    insts = [inst("boat", "boat", "water")]
+    est = FakeEstimator(values={"boat_x": 0.9, "boat_y": 0.6})
+    pl = SequentialClairicPlacer(est)
+    out = pl.place("r", insts, canvas_info(), b"", context(insts))
+    assert pl.trace[0]["proposal"]["x"] == 0.9 and pl.trace[0]["proposal"]["y"] == 0.6 and out[0].x != 0.9
+
+
+def test_water_hint_parts_can_be_split_into_text_and_range():
+    insts = [inst("boat", "boat", "water")]
+    def run(**kw):
+        est = FakeEstimator()
+        SequentialClairicPlacer(est, **kw).place("r", insts, canvas_info(), b"", context(insts))
+        c = est.calls[0]
+        by = {f.name: f for f in c["fields"]}
+        return "Water is found at" in c["text"], by["boat_x"].maximum <= 0.5
+    assert run() == (True, True)
+    assert run(water_hint_parts=("text",)) == (True, False)           # 文章だけ: 範囲は絞らない
+    assert run(water_hint_parts=("range",)) == (False, True)          # 範囲だけ: 文章なし
+    assert run(use_water_hint=False) == (False, False)
+    with pytest.raises(ValueError):
+        SequentialClairicPlacer(FakeEstimator(), water_hint_parts=("map",))
+
+
+def test_the_intent_alone_does_not_say_where_the_water_is():
+    est = FakeEstimator()
+    SequentialClairicPlacer(est, use_water_hint=False).place("r", [inst("boat", "boat", "water")], canvas_info(), b"", context([inst("boat", "boat", "water")]))
+    t = est.calls[0]["text"]
+    assert "floats on water" in t and "Water is found at" not in t       # 水の上という意図は伝わるが、場所は伝わらない

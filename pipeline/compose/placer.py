@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import random
 import re
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -172,19 +173,45 @@ class SequentialClairicPlacer:
     name = "clairic-seq"
 
     def __init__(self, estimator: Estimator, limits: Limits | None = None, use_image: bool = True, use_grid: bool = True,
-                 use_history: bool = True, use_water_hint: bool = True):
+                 use_history: bool = True, use_water_hint: bool = True, order: str = "main_first", seed: int = 0,
+                 water_hint_parts: tuple[str, ...] = ("text", "range")):
+        if order not in self.ORDERS:
+            raise ValueError(f"order は {self.ORDERS} のどれか")
+        self.order_mode, self.seed = order, seed
+        if not set(water_hint_parts) <= {"text", "range"}:
+            raise ValueError("water_hint_parts は 'text'(水の領域の文章)と 'range'(項目の範囲を水域の箱に絞る)の組")
+        self.water_hint_parts = tuple(water_hint_parts) if use_water_hint else ()
         self.estimator = estimator
         self.limits = limits or Limits()
         self.use_image, self.use_grid, self.use_history, self.use_water_hint = use_image, use_grid, use_history, use_water_hint
         self.trace: list[dict] = []     # 呼び出しごとの記録(実験の確認用)
 
-    @staticmethod
-    def order(instances: list[Instance]) -> list[int]:
-        """主役 → 水の上の物 → 地上の物(奥に置く大きい物は後ろに回さず、そのまま) → 空中の物。"""
+    ORDERS = ("main_first", "reverse", "back_to_front", "front_to_back", "random")
+
+    def order(self, instances: list[Instance], canvas: CanvasInfo | None = None) -> list[int]:
+        """尋ねる順。どれが良いかは未確認なので、`order` で入れ替えて実験する(設計書 M3)。
+        main_first: 主役 → 水の上の物 → 地上の物 → 空中の物(既定。最初に私が決め打ちにした順)。
+        reverse: main_first の逆。
+        back_to_front: 空中の物、次に地上の物を奥から手前へ(規則の配置の y の小さい順 = 実寸が大きい物や船が先、主役が最後)。画家が奥から描く順。
+        front_to_back: back_to_front の逆(手前から)。
+        random: 乱数(seed で固定)。"""
+        n_ = len(instances)
+        if self.order_mode == "random":
+            idx = list(range(n_))
+            random.Random(self.seed).shuffle(idx)
+            return idx
+        if self.order_mode in ("back_to_front", "front_to_back"):
+            if canvas is None:
+                raise ValueError("back_to_front / front_to_back には canvas が要る")
+            prior = RuleBasedPlacer().place("", instances, canvas, b"")
+            idx = sorted(range(n_), key=lambda n: (not instances[n].airborne, prior[n].y, n))
+            return idx if self.order_mode == "back_to_front" else idx[::-1]
+
         def key(n: int):
             i = instances[n]
             return (i.airborne, i.spec.role != "main", i.habitat != "water", n)
-        return sorted(range(len(instances)), key=key)
+        base = sorted(range(n_), key=key)
+        return base[::-1] if self.order_mode == "reverse" else base
 
     def place(self, text, instances, canvas, base_png, context=None):
         if context is None:
@@ -192,7 +219,7 @@ class SequentialClairicPlacer:
         lim, hy = self.limits, canvas.horizon_y
         placed: dict[int, Placement] = {}
         self.trace = []
-        for step, n in enumerate(self.order(instances)):
+        for step, n in enumerate(self.order(instances, canvas)):
             inst = instances[n]
             sid = _safe(inst.id)
             water = context.water
@@ -216,15 +243,15 @@ class SequentialClairicPlacer:
             x_lo, x_hi = lim.margin_x, 1 - lim.margin_x
             y_lo, y_hi = (lim.sky_margin, max(lim.sky_margin + 0.05, hy - lim.sky_margin)) if inst.airborne else (min(hy + lim.min_ground_gap, 0.99), 1.0)
             water_note = ""
-            if self.use_water_hint and water is not None and not inst.airborne:
+            if self.water_hint_parts and water is not None and not inst.airborne:
                 bb = water.bbox()
-                if inst.habitat == "water" and bb is not None:
+                if inst.habitat == "water" and bb is not None and "range" in self.water_hint_parts:
                     x_lo, x_hi = max(x_lo, bb[0] + 0.02), min(x_hi, bb[1] - 0.02)
                     y_lo, y_hi = max(y_lo, bb[2] + 0.02), min(y_hi, bb[3] - 0.02)
                     if x_hi <= x_lo + 0.02 or y_hi <= y_lo + 0.02:
                         x_lo, x_hi = lim.margin_x, 1 - lim.margin_x
                         y_lo, y_hi = (min(hy + lim.min_ground_gap, 0.99), 1.0)
-                water_note = water.describe() + (" The foot point must be inside it." if inst.habitat == "water" else " The foot point must not be in the water." if inst.habitat == "land" else "")
+                water_note = "" if "text" not in self.water_hint_parts else water.describe() + (" The foot point must be inside it." if inst.habitat == "water" else " The foot point must not be in the water." if inst.habitat == "land" else "")
             fields = [
                 EstimateField(f"{sid}_x", FieldKind.ESTIMATE, f"Horizontal position of the {inst.spec.name} as a fraction of the image width (0 = left edge, 1 = right edge).",
                               minimum=x_lo, maximum=x_hi, step=0.01),
@@ -261,9 +288,11 @@ class SequentialClairicPlacer:
                 vals[suffix] = float(val)
             pl = Placement(x=vals["x"], y=vals["y"], scale_mult=vals["scale"], rotation_deg=vals["rot"],
                            x_range80=resp.values[f"{sid}_x"].range80, y_range80=resp.values[f"{sid}_y"].range80)
+            proposal = pl
             if water is not None:   # 補正は、次の要素に見せる画像に反映するため、その場で行う
                 fixed, _ = apply_habitat([inst], [pl], water, self.limits)
                 pl = fixed[0]
             placed[n] = pl
-            self.trace.append({"step": step, "instance": inst.id, "state": state, "n_images": len(imgs)})
+            self.trace.append({"step": step, "instance": inst.id, "state": state, "n_images": len(imgs),
+                               "proposal": {"x": proposal.x, "y": proposal.y, "scale_mult": proposal.scale_mult, "rotation_deg": proposal.rotation_deg}})
         return [placed[n] for n in range(len(instances))]

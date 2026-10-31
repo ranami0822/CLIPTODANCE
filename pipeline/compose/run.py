@@ -103,6 +103,8 @@ def compose(db: PoolDB, pool: str, embedder: Embedder, placer: Placer, request: 
     placements = placer.place(request.text, instances, canvas, png_bytes(canvas_img), context=ctx)
     if getattr(placer, "trace", None):
         log["placer_trace"] = placer.trace
+    log["placements_raw"] = [{"instance": i.id, "x": round(p.x, 4), "y": round(p.y, 4), "scale_mult": round(p.scale_mult, 3), "rotation_deg": round(p.rotation_deg, 2)}
+                             for i, p in zip(instances, placements)]       # 補正の前(Clairic などの提案そのまま。逐次配置では、要素ごとの補正のあと)
     if water is not None:
         placements, hlog = apply_habitat(instances, placements, water, cfg.limits)
         log["habitat_corrections"] = hlog

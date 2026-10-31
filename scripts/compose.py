@@ -32,6 +32,7 @@ def main() -> None:
     ap.add_argument("--request", required=True)
     ap.add_argument("--placer", choices=["clairic", "clairic-seq", "rules"], default="clairic")
     ap.add_argument("--no-water", action="store_true", help="水と陸の地図を作らない(Clef を呼ばない)")
+    ap.add_argument("--seq-order", default="main_first", help="clairic-seq の尋ねる順: main_first | reverse | back_to_front | front_to_back | random")
     ap.add_argument("--seq-off", nargs="*", default=[], choices=["image", "grid", "history", "water"], help="clairic-seq で外す要素(切り分けの実験用)")
     ap.add_argument("--base-rank", type=int, default=0, help="土台の候補の何番目を使うか(0 が最上位)")
     ap.add_argument("--out", default="data/out")
@@ -44,7 +45,7 @@ def main() -> None:
         from adapters.cloudflare import CloudflareEstimator
         est = CloudflareEstimator()
         placer = ClairicPlacer(est) if a.placer == "clairic" else SequentialClairicPlacer(
-            est, use_image="image" not in a.seq_off, use_grid="grid" not in a.seq_off, use_history="history" not in a.seq_off, use_water_hint="water" not in a.seq_off)
+            est, use_image="image" not in a.seq_off, use_grid="grid" not in a.seq_off, use_history="history" not in a.seq_off, use_water_hint="water" not in a.seq_off, order=a.seq_order)
     else:
         placer = RuleBasedPlacer()
     if not a.no_water:
