@@ -95,7 +95,8 @@ def ingest_image(
         "title": item.title, "artist": item.artist, "date_text": item.date_text,
         "width": work.width, "height": work.height,
         "orig_path": str(orig_path), "work_path": str(work_path), "sha256": sha256_bytes(image_bytes),
-        "horizon_y": horizon_y, "horizon_conf": horizon_conf, "horizon_checked": 0, "crop_box": crop_box,
+        "horizon_y": horizon_y, "horizon_auto_y": horizon_y, "horizon_conf": horizon_conf, "horizon_checked": 0,
+        "crop_box": crop_box,
         "embedding": vec_to_blob(image_vec), "embedding_model": embedder.name,
         "attrs": None, "judge_version": None, "meta": item.meta,
     })

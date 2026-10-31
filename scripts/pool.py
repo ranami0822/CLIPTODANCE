@@ -6,6 +6,9 @@
   python scripts/pool.py sheet  --pool meiga --kind horizon|cutouts
   python scripts/pool.py search --pool meiga --text "a horse" [--k 12]
   python scripts/pool.py set-horizon --pool meiga --id met-436535 --y 0.62
+  python scripts/pool.py label-sheets --pool meiga        # 番号つきの一覧を作る
+  python scripts/pool.py import-labels --pool meiga --usable 1,3,5-9 --horizon 3=0.45 --horizon-na 2
+  python scripts/pool.py eval   --pool meiga              # 自動の値と人の判断の一致を測る
   python scripts/pool.py stats  --pool meiga
 
 データは data/pool/<pool>/ に置く(git 管理外)。
@@ -138,6 +141,57 @@ def cmd_set_horizon(a) -> None:
     print(f"{a.id}: horizon_y={a.y} (checked)")
 
 
+def cmd_label_sheets(a) -> None:
+    from pipeline.pool import labels
+    from pipeline.pool.sheet import numbered_cutout_sheets, numbered_horizon_sheet
+
+    db = open_db(a.pool)
+    out = pool_root(a.pool) / "label"
+    cut_nums = labels.numbering(db, a.pool)
+    img_nums = labels.image_numbering(db, a.pool)
+    labels.save_numbering(out / "numbering.json", cut_nums, img_nums)
+    cuts = [(n, db.get("cutouts", cid)) for n, cid in cut_nums.items()]
+    imgs = [(n, db.get("images", iid)) for n, iid in img_nums.items()]
+    for p in numbered_cutout_sheets(cuts, out, per_sheet=a.per_sheet):
+        print(p)
+    print(numbered_horizon_sheet(imgs, out / "horizon.png"))
+
+
+def cmd_import_labels(a) -> None:
+    from pipeline.pool import labels
+
+    db = open_db(a.pool)
+    if a.usable is not None:
+        print("usable:", labels.import_usable(db, a.pool, labels.parse_numbers(a.usable), upto=a.upto))
+    if a.horizon or a.horizon_na or a.horizon_rest_ok:
+        vals = labels.parse_horizon_values(a.horizon) if a.horizon else {}
+        na = labels.parse_numbers(a.horizon_na) if a.horizon_na else []
+        print("horizon:", labels.import_horizons(db, a.pool, vals, na, accept_rest=a.horizon_rest_ok))
+
+
+def cmd_eval(a) -> None:
+    from pipeline.pool import labels
+
+    db = open_db(a.pool)
+    res = {"cutouts": labels.evaluate_cutouts(db, a.pool), "horizon": labels.evaluate_horizons(db, a.pool)}
+    out = pool_root(a.pool) / "eval.json"
+    out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+    c, h = res["cutouts"], res["horizon"]
+    print(f"[切り抜き] 判定済み {c['n_labeled']} 個(使える {c.get('n_usable', 0)} 個)")
+    for f in c.get("features", [])[:12]:
+        print(f"  {f['feature']:24s} AUC={f['auc']:.3f} ({f['direction']}) 強さ={f['strength']:.2f} n={f['n']}")
+    for k in ("clef_rule_single_object>0.5", "clef_rule_single>0.5_and_cutoff<0.5"):
+        if k in c:
+            print(f"  {k}: {c[k]}")
+    if "majority_class_accuracy" in c:
+        print(f"  (参考)全部を多数派に分類したときの正解率: {c['majority_class_accuracy']}")
+    print(f"[地平線] 確認済み {h['n_labeled']} 枚(対象外 {h['n_not_applicable']} 枚)")
+    for k in ("mean_abs_error", "median_abs_error", "max_error", "within_0.05", "within_0.10", "confidence_vs_accuracy_spearman"):
+        if k in h:
+            print(f"  {k}: {h[k]}")
+    print(f"詳細: {out}")
+
+
 def cmd_stats(a) -> None:
     db = open_db(a.pool)
     imgs = db.rows("images")
@@ -171,6 +225,15 @@ def main() -> None:
     p.add_argument("--text", required=True); p.add_argument("--k", type=int, default=12)
     p = add("set-horizon", cmd_set_horizon)
     p.add_argument("--id", required=True); p.add_argument("--y", type=float, required=True)
+    p = add("label-sheets", cmd_label_sheets)
+    p.add_argument("--per-sheet", type=int, default=30)
+    p = add("import-labels", cmd_import_labels)
+    p.add_argument("--usable", help="使える切り抜きの番号。例: 1,3,5-9(ほかは使えない扱い)")
+    p.add_argument("--upto", type=int, help="この番号までを判定済みとする(省略時は全部)")
+    p.add_argument("--horizon", help="地平線の正解。例: 3=0.45,5=0.60(画像の番号=高さ、上が0)")
+    p.add_argument("--horizon-na", help="地平線のない絵(対象外)の画像の番号。例: 2,7")
+    p.add_argument("--horizon-rest-ok", action="store_true", help="上のどちらにも挙げなかった画像は、自動の線で良いものとして確認済みにする")
+    add("eval", cmd_eval)
     add("stats", cmd_stats)
     a = ap.parse_args()
     a.fn(a)

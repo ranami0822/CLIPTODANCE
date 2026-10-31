@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS images (
     width INTEGER, height INTEGER,          -- 作業用画像の大きさ
     orig_path TEXT, work_path TEXT, sha256 TEXT,
     horizon_y REAL, horizon_conf REAL,      -- 0-1(上が0)。初期値は軽い処理(R3a)
-    horizon_checked INTEGER NOT NULL DEFAULT 0,
+    horizon_checked INTEGER NOT NULL DEFAULT 0,  -- 0 = 未確認、1 = 目視で確認(値は horizon_y)、2 = 地平線のない絵(対象外)
+    horizon_auto_y REAL,                    -- 自動推定の値(手で直しても残す。誤差の測定用)
     crop_box TEXT,                          -- 元画像上の内容部分 [x0,y0,x1,y1](額縁・余白を除いた範囲)
     embedding BLOB, embedding_model TEXT,   -- 画像全体の埋め込み(土台の検索用)
     attrs TEXT, judge_version TEXT,
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS cutouts (
     mask_quality REAL,                                -- SAM の予測 IoU × 安定度
     embedding BLOB, embedding_model TEXT,             -- 切り抜きの埋め込み(検索用)
     attrs TEXT, judge_version TEXT,
+    usable INTEGER,                                   -- 人の判定(1 = 使える、0 = 使えない、NULL = 未判定)
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS cutouts_image ON cutouts(image_id);
@@ -51,7 +53,8 @@ CREATE INDEX IF NOT EXISTS cutouts_image ON cutouts(image_id);
 _JSON_COLS = {"attrs", "meta", "crop_box"}
 
 # 後から足した列(古い DB に ALTER TABLE で足す)
-_ADDED_COLUMNS = [("images", "crop_box", "TEXT"), ("cutouts", "aspect", "REAL"), ("cutouts", "thickness", "REAL")]
+_ADDED_COLUMNS = [("images", "crop_box", "TEXT"), ("cutouts", "aspect", "REAL"), ("cutouts", "thickness", "REAL"),
+                  ("images", "horizon_auto_y", "REAL"), ("cutouts", "usable", "INTEGER")]
 
 
 def vec_to_blob(vec: np.ndarray) -> bytes:
@@ -74,6 +77,10 @@ class PoolDB:
             have = {r["name"] for r in self._db.execute(f"PRAGMA table_info({table})")}
             if col not in have:
                 self._db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+        # 自動推定値の列を足す前に取り込んだ画像: 未確認(手で直していない)なら、いまの値が自動推定値
+        have = {r["name"] for r in self._db.execute("PRAGMA table_info(images)")}
+        if {"horizon_y", "horizon_checked", "horizon_auto_y"} <= have:
+            self._db.execute("UPDATE images SET horizon_auto_y = horizon_y WHERE horizon_auto_y IS NULL AND horizon_checked = 0")
         self._db.commit()
 
     def close(self) -> None:
