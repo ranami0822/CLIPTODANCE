@@ -122,6 +122,21 @@ def import_marks(db: PoolDB, pool: str, universe: list[int], single: list[int], 
     return {"labeled": len(uni), "single": len(set(single)), "repeat": len(set(repeat))}
 
 
+def import_marks_by_ids(db: PoolDB, universe: list[str], single: list[str], repeat: list[str], source: str = "human") -> dict:
+    """切り抜きの id で印を付ける(あとから足した切り抜きは、番号が前の一覧と別になるため)。
+    universe の中で single / repeat に挙げたものを 1、ほかを 0 にする。universe の外は触らない。"""
+    uni, sg, rp = set(universe), set(single), set(repeat)
+    missing = [i for i in uni if db.get("cutouts", i) is None]
+    outside = sorted((sg | rp) - uni)
+    if missing or outside:
+        raise ValueError(f"id が不正: 存在しない {missing[:5]} / universe の外 {outside[:5]}")
+    ucol, rcol = USABLE_COL[source], REPEAT_COL[source]
+    for i in sorted(uni):
+        db.update("cutouts", i, **{ucol: 1 if i in sg else 0, rcol: 1 if i in rp else 0})
+    db.commit()
+    return {"labeled": len(uni), "single": len(sg), "repeat": len(rp)}
+
+
 def import_horizons(db: PoolDB, pool: str, values: dict[int, float], not_applicable: list[int], accept_rest: bool = False,
                     source: str = "human") -> dict:
     """values = 直す画像(番号 → 正しい高さ)、not_applicable = 地平線のない絵。

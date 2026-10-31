@@ -24,6 +24,7 @@ class Instance:
     height_frac: float | None  # 空中の物の高さ(画面の高さに対する比)
     airborne: bool
     aspect: float             # 切り抜きの 幅 / 高さ
+    width_m: float | None = None   # 幅(長さ)で大きさを決める種類(船など)の実寸(m)。あれば、height_m でなくこちらで決める
 
 
 @dataclass(frozen=True)

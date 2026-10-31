@@ -21,6 +21,7 @@ class RenderConfig:
     nudge_steps: tuple[float, ...] = (0.05, 0.10, 0.15, 0.20, 0.25, 0.30)   # 重なりを避ける横ずれ(画面の幅に対する比)
     min_height_px: float = 6.0
     max_height_frac: float = 0.6        # 地上の物の高さの上限(画面の高さに対する比)。超えるなら、足元を地平線の方へ動かして収める(遠近を保つ)
+    max_width_frac: float = 0.5         # 地上の物の幅の上限(画面の幅に対する比)。同じく、足元を地平線の方へ動かして収める
 
 
 def _premult_sprite(rgba: np.ndarray, height: int, flip: bool) -> np.ndarray:
@@ -106,14 +107,20 @@ def render_collage(base: Image.Image, horizon_y: float, objects: list[tuple[Inst
         if inst.airborne:
             h_px = (inst.height_frac or 0.08) * H * sm
         else:
-            h_px = ground_height_px(inst.height_m or 1.0, y, horizon_y, H, sm, lim.camera_height_m)
-            cap = cfg.max_height_frac * H
-            if h_px > cap:     # 大きすぎる: 足元を奥(地平線の方)へ動かして、遠近の式で高さを cap に収める
-                y_new = horizon_y + cap * lim.camera_height_m / ((inst.height_m or 1.0) * H * sm)
-                y_new = max(y_new, horizon_y + lim.min_ground_gap)
+            def size_at(yy: float) -> float:
+                """足元が yy のときの高さ(画素)。幅で決める種類は、幅から高さを出す(同じ遠近の式、縦横の縮尺は同じ)。"""
+                if inst.width_m:
+                    return ground_height_px(inst.width_m, yy, horizon_y, H, sm, lim.camera_height_m) / inst.aspect
+                return ground_height_px(inst.height_m or 1.0, yy, horizon_y, H, sm, lim.camera_height_m)
+            h_px = size_at(y)
+            # 大きすぎる(高さが画面の max_height_frac、または幅が max_width_frac を超える): 足元を奥(地平線の方)へ動かす。
+            # 大きさは (足元の y − 地平線の y) に比例するので、比で動かせば、遠近の式のまま上限に収まる
+            ratio = min(1.0, cfg.max_height_frac * H / h_px, cfg.max_width_frac * W / (h_px * inst.aspect))
+            if ratio < 1.0:
+                y_new = max(horizon_y + (y - horizon_y) * ratio, horizon_y + lim.min_ground_gap)
                 rec["corrections"].append({"moved_toward_horizon": [round(y, 4), round(y_new, 4)]})
                 y = y_new
-                h_px = ground_height_px(inst.height_m or 1.0, y, horizon_y, H, sm, lim.camera_height_m)
+                h_px = size_at(y)
         h_px = max(h_px, cfg.min_height_px)
         sprite = _premult_sprite(rgba, int(round(h_px)), pl.flip)
         sh, sw = sprite.shape[:2]

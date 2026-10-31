@@ -120,3 +120,31 @@ def numbered_horizon_sheet(numbered: list[tuple[int, dict]], path: str | Path, t
     out = Path(path); out.parent.mkdir(parents=True, exist_ok=True)
     sheet.crop((0, 0, sheet.width, sheet.height - LABEL_H)).save(out)
     return out
+
+
+def captioned_cutout_sheets(items: list[tuple[int, dict, str]], out_dir: str | Path, per_sheet: int = 40, cols: int = 8,
+                            thumb: int = 170, prefix: str = "new") -> list[Path]:
+    """(番号, 切り抜きの行, 見出し)の一覧を、番号と見出しつきの画像にする。見出しはタイルの下に出す(例: 検出のクラス名とスコア)。"""
+    from PIL import ImageFont
+
+    out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
+    font = ImageFont.load_default(size=13)
+    paths = []
+    for s0 in range(0, len(items), per_sheet):
+        chunk = items[s0:s0 + per_sheet]
+        tiles = []
+        for n, r, caption in chunk:
+            rgba = Image.open(r["cutout_path"]).convert("RGBA")
+            rgba.thumbnail((thumb, thumb))
+            canvas = _checker((thumb, thumb))
+            canvas.paste(rgba, ((thumb - rgba.width) // 2, (thumb - rgba.height) // 2), rgba)
+            d = ImageDraw.Draw(canvas)
+            _badge(d, (4, 3), str(n), size=22)
+            d.rectangle([0, thumb - 18, thumb, thumb], fill=(20, 20, 20))
+            d.text((4, thumb - 16), caption, fill=(235, 235, 235), font=font)
+            tiles.append((canvas, ""))
+        sheet = _grid(tiles, thumb, cols)
+        path = out_dir / f"{prefix}_{chunk[0][0]:03d}-{chunk[-1][0]:03d}.png"
+        sheet.crop((0, 0, sheet.width, sheet.height - LABEL_H)).save(path)
+        paths.append(path)
+    return paths

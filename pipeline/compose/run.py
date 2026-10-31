@@ -75,9 +75,11 @@ def compose(db: PoolDB, pool: str, embedder: Embedder, placer: Placer, request: 
         for n, c in enumerate(cands):
             rgba = np.asarray(Image.open(c.row["cutout_path"]).convert("RGBA"))
             iid = f"e{ei}_{spec.name}_{n}".replace(" ", "_")
-            inst = Instance(id=iid, spec=spec, cutout_id=c.row["id"], height_m=spec.height_m or entry.mean if not entry.airborne else None,
+            by_width = (not entry.airborne) and spec.height_m is None and entry.width_m is not None   # 明示した高さがなければ、表の幅を使う
+            inst = Instance(id=iid, spec=spec, cutout_id=c.row["id"],
+                            height_m=None if (entry.airborne or by_width) else (spec.height_m or entry.mean),
                             height_frac=entry.height_frac if entry.airborne else None, airborne=entry.airborne,
-                            aspect=rgba.shape[1] / rgba.shape[0])
+                            aspect=rgba.shape[1] / rgba.shape[0], width_m=entry.width_m if by_width else None)
             instances.append(inst); sprites[iid] = rgba; used.add(c.row["id"])
             chosen_log.append({"instance": iid, "cutout_id": c.row["id"], "similarity": round(c.similarity, 4), "label_source": c.label_source,
                                "cutout_area_ratio": round(c.row["area_ratio"], 4)})

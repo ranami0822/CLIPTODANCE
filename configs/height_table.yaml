@@ -35,8 +35,7 @@ entries:
     sd: 0.1
     source: placeholder
   boat:
-    mean: 3.0        # 帆や船体を含めた高さの目安。小舟は低く、帆船は高い(幅が大きい)
-    sd: 1.5
+    width_m: 7.0     # 船は、高さでなく長さ(幅)で大きさを決める。小舟 4〜5m、帆船は 15m 以上(種類で大きく違う。仮置き)
     source: placeholder
   tower:
     mean: 15.0

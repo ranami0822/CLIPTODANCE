@@ -38,6 +38,9 @@ class RuleBasedPlacer:
                 if inst.height_m and inst.height_m > 0:
                     # 背の高い物(木・塔)は、最初から奥に置く。足元が地平線から離れるほど大きく写る(R5)ので、高さが画面の約 35% に収まる位置まで
                     y = min(y, canvas.horizon_y + 0.35 * self.camera_height_m / inst.height_m)
+                if inst.width_m and inst.width_m > 0:
+                    # 幅(長さ)の大きい物(船)も奥に置く。幅が画面の約 25% に収まる位置まで(画面は 3:2 なので、幅の比を高さの比に直す)
+                    y = min(y, canvas.horizon_y + 0.25 * 1.5 * self.camera_height_m / inst.width_m)
                 out.append(Placement(x=self.SLOTS[n % len(self.SLOTS)], y=y))
         return out
 

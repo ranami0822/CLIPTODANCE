@@ -217,3 +217,25 @@ def test_top_overflow_shrinks_around_the_feet_instead_of_pushing_the_feet_down()
     r = log[0]
     assert any("shrunk_to_fit" in c for c in r["corrections"]) and r["applied"]["y"] == pytest.approx(0.8, abs=0.002)   # 足元は動かない
     assert r["bbox_px"][1] >= 0
+
+
+def test_width_based_kinds_are_sized_by_their_length_with_the_same_perspective_formula():
+    boat = Instance(id="e0_boat_0", spec=ElementSpec(name="boat", query="boat", kind="boat"), cutout_id="c", height_m=None, height_frac=None,
+                    airborne=False, aspect=4.0, width_m=7.0)
+    sp = sprite(160, 40, (255, 0, 0))                                       # 幅 160 : 高さ 40 = 4 : 1
+    img, log = draw([(boat, sp, Placement(x=0.5, y=0.8))])
+    r = log[0]
+    expected_w = ground_height_px(7.0, 0.8, HORIZON, H)                    # 幅は、実寸 7m をそのまま遠近の式にかけた値
+    x0, y0, x1, y1 = r["bbox_px"]
+    assert abs((x1 - x0) - expected_w) <= 2 and abs((y1 - y0) - expected_w / 4) <= 2
+
+
+def test_wide_objects_move_toward_the_horizon_to_fit_the_width_limit():
+    cfg = RenderConfig(color_strength=0.0, feather_sigma=0.0, max_width_frac=0.3, max_height_frac=5.0)
+    ship = Instance(id="e0_boat_0", spec=ElementSpec(name="ship", query="ship", kind="boat"), cutout_id="c", height_m=None, height_frac=None,
+                    airborne=False, aspect=3.0, width_m=20.0)
+    img, log = draw([(ship, sprite(120, 40, (255, 0, 0)), Placement(x=0.5, y=0.95))], cfg)
+    r = log[0]
+    x0, _, x1, _ = r["bbox_px"]
+    assert any("moved_toward_horizon" in c for c in r["corrections"]) and (x1 - x0) <= 0.3 * W + 2
+    assert (x1 - x0) == pytest.approx(ground_height_px(20.0, r["applied"]["y"], HORIZON, H), abs=2)     # 動かしたあとも遠近の式のとおり

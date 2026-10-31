@@ -293,3 +293,16 @@ def test_import_marks_labels_only_the_given_numbers_with_both_flags(tmp_path):
         labels.import_marks(db, "p", [2], single=[3], repeat=[], source="human")   # universe の外
     with pytest.raises(ValueError):
         labels.import_marks(db, "p", [99], single=[], repeat=[])
+
+
+def test_import_marks_by_ids_labels_only_the_given_cutouts(tmp_path):
+    db = make_db(tmp_path)
+    ids = [r["id"] for r in db.rows("cutouts")]
+    out = labels.import_marks_by_ids(db, ids[:3], single=[ids[1]], repeat=[ids[2]], source="claude")
+    assert out == {"labeled": 3, "single": 1, "repeat": 1}
+    rows = db.rows("cutouts")
+    assert [(r["usable_claude"], r["repeat_claude"]) for r in rows][:4] == [(0, 0), (1, 0), (0, 1), (None, None)]
+    with pytest.raises(ValueError):
+        labels.import_marks_by_ids(db, ids[:2], single=[ids[4]], repeat=[], source="claude")      # universe の外
+    with pytest.raises(ValueError):
+        labels.import_marks_by_ids(db, ["no-such-id"], single=[], repeat=[], source="claude")

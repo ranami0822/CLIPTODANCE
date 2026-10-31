@@ -223,3 +223,23 @@ def test_select_base_rejects_windows_that_still_contain_backdrop(tmp_path):
         db.update("images", name, work_path=str(tmp_path / path)); db.commit()
     ids = [c.row["id"] for c in select_base(db, "test", FakeEmbedder(), "green")]
     assert "clean" in ids and "arch" not in ids
+
+
+def test_compose_sizes_boats_by_the_width_from_the_table(tmp_path):
+    from pipeline.compose.geometry import ground_height_px
+    db = build_pool(tmp_path)
+    req = ComposeRequest(text="t", base_query="green", canvas_width=600, elements=[ElementSpec(name="b", query="red", kind="boat", role="main")])
+    res = compose(db, "test", FakeEmbedder(), RuleBasedPlacer(), req, HEIGHTS, RenderConfig(color_strength=0.0))
+    r = res.log["render"][0]
+    aspect = 1.0                                                     # 合成の切り抜き(円)は、幅 = 高さ
+    expected_w = ground_height_px(HEIGHTS.get("boat").width_m, r["applied"]["y"], res.log["base"]["horizon_in_canvas"], 400, r["applied"]["scale_mult"])
+    assert abs(r["height_px"] - expected_w / aspect) <= 3                         # 高さでなく、幅(7m)から決まる
+
+
+def test_rule_placer_puts_wide_objects_such_as_boats_farther_so_their_width_fits():
+    from pipeline.compose.geometry import ground_height_px
+    boat = Instance(id="e0_boat_0", spec=ElementSpec(name="boat", query="boat", kind="boat"), cutout_id="c", height_m=None, height_frac=None,
+                    airborne=False, aspect=3.0, width_m=7.0)
+    out = RuleBasedPlacer().place("t", [boat], canvas(), b"")
+    width_px = ground_height_px(7.0, out[0].y, 2 / 3, 400)       # 画面 600x400 での幅(画素)
+    assert width_px <= 0.26 * 600 and out[0].y < 0.80

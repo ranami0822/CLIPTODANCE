@@ -128,7 +128,7 @@ def ingest_image(
             "x0": x0, "y0": y0, "x1": x1, "y1": y1,
             "area_ratio": m.area_ratio, "centrality": m.centrality, "clutter": m.clutter,
             "edge_score": m.edge_score, "border_touch": m.border_touch, "aspect": m.aspect, "thickness": m.thickness,
-            "mask_quality": c.quality,
+            "mask_quality": c.quality, "source": "sam",
             "attrs": None, "judge_version": None,
         })
     vecs = embedder.encode_images(cut_images) if cut_images else np.zeros((0, embedder.dim), np.float32)

@@ -43,7 +43,9 @@ CREATE TABLE IF NOT EXISTS cutouts (
     x0 INTEGER, y0 INTEGER, x1 INTEGER, y1 INTEGER,   -- 作業用画像上の外接矩形(x1,y1 は含まない)
     area_ratio REAL, centrality REAL, clutter INTEGER, edge_score REAL, border_touch INTEGER,
     aspect REAL, thickness REAL,                      -- 最小外接回転矩形の 長辺/短辺、短辺/画像の長辺
-    mask_quality REAL,                                -- SAM の予測 IoU × 安定度
+    mask_quality REAL,                                -- SAM の予測 IoU × 安定度(検出器の切り抜きでは検出スコア)
+    source TEXT,                                      -- 候補の出どころ: 'sam' | 'maskrcnn'(NULL は 'sam')
+    det_label TEXT, det_score REAL,                   -- 検出器が付けたクラス名とスコア(SAM の切り抜きでも、検出と重なれば付く)
     embedding BLOB, embedding_model TEXT,             -- 切り抜きの埋め込み(検索用)
     attrs TEXT, judge_version TEXT,
     usable INTEGER,                                   -- 人の判定: 1 = 単体でそのまま使える、0 = 単体では使えない、NULL = 未判定
@@ -63,7 +65,8 @@ _ADDED_COLUMNS = [("images", "crop_box", "TEXT"), ("cutouts", "aspect", "REAL"),
                   ("cutouts", "usable_ai", "INTEGER"), ("images", "horizon_ai_y", "REAL"), ("images", "horizon_ai_na", "INTEGER"),
                   ("cutouts", "repeat", "INTEGER"), ("cutouts", "repeat_ai", "INTEGER"),
                   ("cutouts", "usable_claude", "INTEGER"), ("cutouts", "repeat_claude", "INTEGER"),
-                  ("images", "horizon_claude_y", "REAL"), ("images", "horizon_claude_na", "INTEGER")]
+                  ("images", "horizon_claude_y", "REAL"), ("images", "horizon_claude_na", "INTEGER"),
+                  ("cutouts", "source", "TEXT"), ("cutouts", "det_label", "TEXT"), ("cutouts", "det_score", "REAL")]
 
 
 def vec_to_blob(vec: np.ndarray) -> bytes:
@@ -90,6 +93,7 @@ class PoolDB:
         have = {r["name"] for r in self._db.execute("PRAGMA table_info(images)")}
         if {"horizon_y", "horizon_checked", "horizon_auto_y"} <= have:
             self._db.execute("UPDATE images SET horizon_auto_y = horizon_y WHERE horizon_auto_y IS NULL AND horizon_checked = 0")
+        self._db.execute("UPDATE cutouts SET source = 'sam' WHERE source IS NULL")
         self._db.commit()
 
     def close(self) -> None:

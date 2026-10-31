@@ -2,6 +2,7 @@
 
   python scripts/pool.py fetch  --pool meiga --query landscape --dept 11 --n 20
   python scripts/pool.py ingest --pool meiga [--limit N] [--force]
+  python scripts/pool.py detect --pool meiga              # Mask R-CNN の検出を、第二の候補として足す
   python scripts/pool.py judge  --pool meiga --model clef-flash --max-neurons 3000
   python scripts/pool.py sheet  --pool meiga --kind horizon|cutouts
   python scripts/pool.py search --pool meiga --text "a horse" [--k 12]
@@ -211,6 +212,49 @@ def cmd_compare(a) -> None:
     print(json.dumps(res, ensure_ascii=False, indent=1))
 
 
+def cmd_detect(a) -> None:
+    from pipeline.pool.augment import augment_image
+    from pipeline.pool.detect import MaskRCNNDetector
+    from pipeline.pool.embed import ClipEmbedder
+
+    db = open_db(a.pool)
+    det, emb = MaskRCNNDetector(score_thresh=a.score), ClipEmbedder()
+    total = {"detections": 0, "matched": 0, "added": 0}
+    for im in db.rows("images", "pool = ?", (a.pool,)):
+        r = augment_image(db, pool_root(a.pool), a.pool, im["id"], det, emb)
+        for k in total:
+            total[k] += getattr(r, k)
+        print(f"{r.image_id}: 検出 {r.detections} / 既存と一致 {r.matched} / 追加 {r.added} / 小さすぎ等 {r.skipped_small} / 重複 {r.skipped_dup} {r.labels}", flush=True)
+    print("合計:", total)
+
+
+def cmd_prefilter(a) -> None:
+    import numpy as np
+    from pipeline.pool import prefilter as pf
+
+    db = open_db(a.pool)
+    X, y, groups, labeled = pf.dataset(db.rows("cutouts", "pool = ?", (a.pool,)))
+    print(f"印のある切り抜き {len(y)} 個(単体 {int(y.sum())} 個)、画像 {len(set(groups))} 枚")
+    best = None
+    for l2 in (0.3, 1.0, 3.0, 10.0):
+        pred = pf.cross_validate_by_group(X, y, groups, l2)
+        a_ = pf.auc(pred, y)
+        print(f"  L2={l2:4.1f}: 画像ごとの交差検証 AUC = {a_:.3f}")
+        if best is None or a_ > best[0]:
+            best = (a_, l2, pred)
+    for cur in pf.pruning_curve(best[2], y):
+        print(f"  単体を {cur['keep_recall']:.0%} 残す: 落とせる {cur['pruned_fraction']:.0%}、残ったものの単体率 {cur['precision_of_kept']:.0%}")
+    model = pf.fit(X, y, best[1])
+    out = pool_root(a.pool) / "prefilter_model.json"
+    pf.save_model(model, out)
+    print("モデル:", out)
+    det = [r for r in labeled if r["source"] == "maskrcnn"]
+    for lo, hi in ((0.5, 0.7), (0.7, 0.9), (0.9, 0.97), (0.97, 1.01)):
+        g = [r for r in det if lo <= r["det_score"] < hi]
+        if g:
+            print(f"  検出スコア {lo:.2f}〜{hi:.2f}: {len(g)} 個、単体 {int(sum(pf.effective_label(r) for r in g))} ({np.mean([pf.effective_label(r) for r in g]):.0%})")
+
+
 def cmd_stats(a) -> None:
     db = open_db(a.pool)
     imgs = db.rows("images")
@@ -260,6 +304,9 @@ def main() -> None:
     p.add_argument("--source", choices=["human", "ai", "claude"], default="human")
     p = add("compare", cmd_compare)
     p.add_argument("--labeler", choices=["ai", "claude"], default="ai", help="人の印と比べる相手(ai = Haiku)")
+    add("prefilter", cmd_prefilter)
+    p = add("detect", cmd_detect)
+    p.add_argument("--score", type=float, default=0.5, help="検出のスコアの下限")
     add("stats", cmd_stats)
     a = ap.parse_args()
     a.fn(a)
