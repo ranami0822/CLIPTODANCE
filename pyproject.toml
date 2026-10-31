@@ -9,9 +9,11 @@ dependencies = ["pyyaml>=6", "requests>=2.31"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# 素材の取り込み(M1)。重いので別にする。GPU のある環境では torch を CUDA 版で入れる。
+ingest = ["numpy", "pillow", "torch", "torchvision", "open_clip_torch", "segment-anything", "opencv-python-headless", "scipy", "scikit-image", "faiss-cpu"]
 
 [tool.setuptools]
-packages = ["pipeline", "adapters"]
+packages = ["pipeline", "pipeline.pool", "pipeline.pool.sources", "adapters"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

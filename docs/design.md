@@ -190,6 +190,15 @@ Oct 31, 2026 · @Ryuuichiro
 | horizon_y / horizon_checked | 土台として使う風景素材の地平線の高さ(0–1、上が0)と、目視確認済みか(R3a) |
 | judge_version | 判定に使ったモデルと質問セットの版(再計算の判断用) |
 
+### 実装(M1。`pipeline/pool/`、`scripts/pool.py`)
+
+- **取得元**: The Met Open Access(CC0)。検索は `v1.1/search`(offset / limit。旧 `v1/search` は 2026-10-01 に廃止)。`isPublicDomain` で画像のあるものだけを使い、元画像(`primaryImage`)を `originals/` に保存する。Art Institute of Chicago の API は、この環境からは 403 で届かなかった(Rijksmuseum の旧 API は 410)。
+- **流れ**: 元画像 → 作業用画像(長辺 2048 以下)→ 地平線の初期値(OpenCV)→ SAM で候補マスク → 指標を計算 → 面積の足切りと重複除去 → 切り抜き PNG(RGBA)→ CLIP 埋め込み(画像全体と切り抜きごと)→ DB。
+- **DB**(`data/pool/<pool>/pool.sqlite`): `images`(出典・ライセンス・地平線・全体の埋め込み)と `cutouts`(元画像への参照・外接矩形・指標・埋め込み・属性・判定の版)。索引は DB の埋め込みから FAISS で作る。
+- **指標の定義**(すべて初期案): `area_ratio` = マスク面積 / 画像面積。`centrality` = 重心と画像中心の距離 / 半対角線。`clutter` = マスク周囲の帯(長辺の 3%)と交わる Felzenszwalb セグメントの数(Sketch2Photo の基準を、帯の幅を画像サイズに対する比にして再現)。`edge_score` = 平滑化した輪郭の長さ / 生の輪郭の長さ(1 に近いほど滑らか)。`border_touch` = 外接矩形が画像の端に接する辺の数。
+- **属性判定は取り込みと別の工程**(`judge`): 1 切り抜きにつき 1 回の `ask` に 7 問をまとめる。呼び出しごとの消費を積算して、`--max-neurons` で止まり、次回は続きから再開する。判定の版は「モデルID + 質問の版」で、変わると再判定の対象になる。
+- **CPU での速度**(この環境は 4 コア・16 GB。2026-10-31 実測): SAM ViT-B の自動マスク生成は、約 600×480 の画像で 16×16 の格子が約 30 秒、32×32 が約 90 秒。2048 ピクセルの作業用画像では 1 枚あたり約 50 秒。CLIP の埋め込みは 1 枚 0.04 秒。約 200 枚を 16×16 で処理すると約 3 時間。GPU があれば大きく短縮できる。
+
 ## ClefとClairicの使い方
 
 Clefは選択と採点を担当する判定モデル、Clairicは数値を出す抽出モデルとして分担する。どちらも文章を生成せず、確率や型付きの値だけを返す。
@@ -317,7 +326,7 @@ Sketch2Photoが合成結果に数値の点を付けて最適な組み合わせ�
 | --- | --- | --- | --- |
 | CLIP-CLOP (google-deepmind/arnheim の Arnheim 3) | パッチ配置の勾配最適化 | Apache 2.0。約2,800行。`arnheim_3/src` に collage.py / collage_generator.py / patches.py / rendering.py / training.py / transformations.py。CLIPは設定で切り替え(既定 ViT-B/32)。`--no-cuda` でCPU実行も可。サンプルパッチはCC BY 4.0(Fruit and veg のみ CC BY-SA 4.0) | M5で、こちらの配置結果を初期値にして細部を詰める用途で試す。ライセンス表示を保持して取り込む |
 | Paint by Example | 参照画像付きの挿入となじませ | Stable Diffusion v1.4 を初期値にした公開チェックポイント(Fantasy-Studio/Paint-by-Example)。diffusers の PaintByExamplePipeline が image / mask_image / example_image を受ける。GitHubの最終更新は約2年前。ライセンス表示は「other」。ModelScope版は屋外の自然風景向けで顔未対応、推論はGPUのみと記載 | 製品に使う前にLICENSEを読む。参照画像は元のREADMEではMSCOCOから手動で探しているので、ここをこちらの自動検索で置き換える |
-| CLIP / SAM | 埋め込みと切り抜き | ライセンスはこの資料を作る過程では確認していない | 採用前に各リポジトリのLICENSEを確認する |
+| CLIP / SAM | 埋め込みと切り抜き | SAM: コードとモデルが Apache 2.0(リポジトリの LICENSE と README、2026-10-31 確認)。埋め込みは open_clip の ViT-B-32(LAION-2B の重み): コードは MIT(パッケージの表記)、重みは HuggingFace のモデルカードで MIT。OpenAI 版の重みの再配布版(timm 側)は apache-2.0 と表記されていて、元の OpenAI のリポジトリの表記とは確認していない | LAION 版を使う。SA-1B データセットは別の条件(研究用)だが、使わない |
 
 CLIP-CLOPの初期化は元々ランダムで(各パッチの色変換とアフィン行列をランダムに初期化)、こちらの配置を初期値として注入できるかは未確認。`collage_generator.py` と `training.py` を読んで判断する。できない場合は、初期化部分を改造するか、自前の簡易最適化で代用する。
 
@@ -430,6 +439,7 @@ Cloudflare の公式ドキュメント(2026-10-31 に本文を取得して確認
 
 ## 変更履歴
 
+- 2026-10-31: M1 の取り込みを実装(Met Open Access、SAM、CLIP、SQLite、FAISS、Clef による属性判定、コンタクトシート)。CLIP / SAM のライセンスを確認。
 - 2026-10-31: Cloudflare のリクエスト形式を公式ドキュメントで確認し、合成データで実際に呼んで裏取り。`CloudflareJudge` / `CloudflareEstimator` を実装(M0 のゲートのうち REST 呼び出しとログは達成)。score は 0 始まり、消費ニューロンはヘッダ、state は空文字可。
 - 2026-10-31: `Judge` / `Estimator` を作り直し(まとめ送信・上限の分離・使用量・例外・キャッシュ・テスト)。
 - 2026-10-31: R7 の三分割と主役の高さを「目安」とし、規則の検査には使わないと決定(R2a との衝突の解決)。
