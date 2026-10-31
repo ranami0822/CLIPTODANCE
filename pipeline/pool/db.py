@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS images (
     orig_path TEXT, work_path TEXT, sha256 TEXT,
     horizon_y REAL, horizon_conf REAL,      -- 0-1(上が0)。初期値は軽い処理(R3a)
     horizon_checked INTEGER NOT NULL DEFAULT 0,
+    crop_box TEXT,                          -- 元画像上の内容部分 [x0,y0,x1,y1](額縁・余白を除いた範囲)
     embedding BLOB, embedding_model TEXT,   -- 画像全体の埋め込み(土台の検索用)
     attrs TEXT, judge_version TEXT,
     meta TEXT,
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS cutouts (
     cutout_path TEXT NOT NULL,
     x0 INTEGER, y0 INTEGER, x1 INTEGER, y1 INTEGER,   -- 作業用画像上の外接矩形(x1,y1 は含まない)
     area_ratio REAL, centrality REAL, clutter INTEGER, edge_score REAL, border_touch INTEGER,
+    aspect REAL, thickness REAL,                      -- 最小外接回転矩形の 長辺/短辺、短辺/画像の長辺
     mask_quality REAL,                                -- SAM の予測 IoU × 安定度
     embedding BLOB, embedding_model TEXT,             -- 切り抜きの埋め込み(検索用)
     attrs TEXT, judge_version TEXT,
@@ -46,7 +48,10 @@ CREATE TABLE IF NOT EXISTS cutouts (
 CREATE INDEX IF NOT EXISTS cutouts_image ON cutouts(image_id);
 """
 
-_JSON_COLS = {"attrs", "meta"}
+_JSON_COLS = {"attrs", "meta", "crop_box"}
+
+# 後から足した列(古い DB に ALTER TABLE で足す)
+_ADDED_COLUMNS = [("images", "crop_box", "TEXT"), ("cutouts", "aspect", "REAL"), ("cutouts", "thickness", "REAL")]
 
 
 def vec_to_blob(vec: np.ndarray) -> bytes:
@@ -65,6 +70,10 @@ class PoolDB:
         self._db = sqlite3.connect(path)
         self._db.row_factory = sqlite3.Row
         self._db.executescript(SCHEMA)
+        for table, col, typ in _ADDED_COLUMNS:
+            have = {r["name"] for r in self._db.execute(f"PRAGMA table_info({table})")}
+            if col not in have:
+                self._db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
         self._db.commit()
 
     def close(self) -> None:

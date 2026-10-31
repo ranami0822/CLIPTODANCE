@@ -18,6 +18,9 @@ class MaskMetrics:
     clutter: int        # マスクの周囲の帯と交わるセグメントの数(Sketch2Photo の基準。多いほど背景が複雑)
     edge_score: float   # 縁の滑らかさ(0〜1、1 = 滑らか)。生の輪郭の長さに対する、平滑化した輪郭の長さの比
     border_touch: int   # 外接矩形が画像の端に接している辺の数(0〜4。見切れの目安)
+    aspect: float       # 最小外接回転矩形の 長辺 / 短辺(1 以上)。細長いほど大きい
+    thickness: float    # 最小外接回転矩形の短辺 / 画像の長辺。細い帯ほど小さい
+    backdrop_frac: float  # マスクのうち、余白(額縁の外・アーチの四隅)にかかる割合
 
 
 def segment_map(rgb: np.ndarray, max_side: int = 512) -> np.ndarray:
@@ -46,10 +49,19 @@ def edge_smoothness(mask: np.ndarray) -> float:
     return float(min(1.0, smooth / raw))
 
 
+def rect_shape(mask: np.ndarray) -> tuple[float, float]:
+    """(長辺, 短辺)。最小外接回転矩形の大きさ(画素)。"""
+    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    pts = np.concatenate(contours)
+    (_, _), (w, h), _ = cv2.minAreaRect(pts)
+    return float(max(w, h)), float(min(w, h))
+
+
 def compute_metrics(
-    mask: np.ndarray, labels: np.ndarray, band_frac: float = 0.03
+    mask: np.ndarray, labels: np.ndarray, band_frac: float = 0.03, backdrop: np.ndarray | None = None
 ) -> MaskMetrics:
-    """`mask` は bool の (H, W)。`labels` は `segment_map` の結果。`band_frac` は帯の幅(長辺に対する比)。"""
+    """`mask` は bool の (H, W)。`labels` は `segment_map` の結果。`band_frac` は帯の幅(長辺に対する比)。
+    `backdrop` は余白のマスク(bool、(H, W))。あれば `backdrop_frac` を計算する。"""
     h, w = mask.shape
     ys, xs = np.nonzero(mask)
     area_ratio = float(mask.sum() / (h * w))
@@ -64,4 +76,8 @@ def compute_metrics(
 
     x0, x1, y0, y1 = xs.min(), xs.max() + 1, ys.min(), ys.max() + 1
     border_touch = int(x0 == 0) + int(y0 == 0) + int(x1 == w) + int(y1 == h)
-    return MaskMetrics(area_ratio, centrality, clutter, edge_smoothness(mask), border_touch)
+    long_side, short_side = rect_shape(mask)
+    aspect = long_side / max(short_side, 1.0)
+    thickness = short_side / max(h, w)
+    backdrop_frac = float(backdrop[mask].mean()) if backdrop is not None else 0.0
+    return MaskMetrics(area_ratio, centrality, clutter, edge_smoothness(mask), border_touch, aspect, thickness, backdrop_frac)

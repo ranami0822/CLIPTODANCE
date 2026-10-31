@@ -72,16 +72,24 @@ def select_masks(
     max_area_ratio: float = 0.6,
     dedupe_iou: float = 0.85,
     max_cutouts: int = 12,
+    max_aspect: float = 8.0,
+    min_thickness: float = 0.02,
+    max_backdrop_frac: float = 0.2,
 ) -> list[Candidate]:
-    """面積で足切りし、重なりの大きい重複を落として、品質の高い順に上位だけ残す。
+    """足切りし、重なりの大きい重複を落として、品質の高い順に上位だけ残す。数値はすべて初期案。
 
-    指標(`metrics`)が付いていれば面積比はそちらを使う。数値はすべて初期案。
+    足切り: 面積比 / 細長さ(`aspect` が大きい、または `thickness` が小さい = 額縁の帯・柱・水平線のような帯)/
+    余白にかかる割合(`backdrop_frac`)。指標(`metrics`)が付いていないマスクは、面積だけで判定する。
     """
     pool = []
     for c in candidates:
-        ratio = c.metrics.area_ratio if c.metrics is not None else float(c.mask.mean())
-        if min_area_ratio <= ratio <= max_area_ratio:
-            pool.append(c)
+        m = c.metrics
+        ratio = m.area_ratio if m is not None else float(c.mask.mean())
+        if not (min_area_ratio <= ratio <= max_area_ratio):
+            continue
+        if m is not None and (m.aspect > max_aspect or m.thickness < min_thickness or m.backdrop_frac > max_backdrop_frac):
+            continue
+        pool.append(c)
     pool.sort(key=lambda c: c.quality, reverse=True)
     kept: list[Candidate] = []
     for c in pool:

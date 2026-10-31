@@ -11,6 +11,7 @@ from PIL import Image
 from . import attrs as attrs_mod
 from .db import PoolDB, vec_to_blob
 from .embed import Embedder
+from .frame import remove_frame
 from .horizon import estimate_horizon
 from .imageops import cutout_rgba, fit_long_side, load_rgb, on_gray, png_bytes, sha256_bytes
 from .metrics import compute_metrics, segment_map
@@ -26,6 +27,10 @@ class IngestConfig:
     max_area_ratio: float = 0.6
     dedupe_iou: float = 0.85
     max_cutouts: int = 12
+    max_aspect: float = 8.0          # 細長いマスク(額縁の帯・柱・水平線)を落とす
+    min_thickness: float = 0.02
+    max_backdrop_frac: float = 0.2   # 余白(アーチの四隅など)にかかるマスクを落とす
+    remove_frame: bool = True
 
 
 @dataclass
@@ -63,6 +68,10 @@ def ingest_image(
     orig_path.write_bytes(image_bytes)
     t0 = clock()
     full = load_rgb(image_bytes)
+    frame = remove_frame(np.asarray(full)) if cfg.remove_frame else None
+    if frame is not None and not frame.fallback:
+        full = full.crop(frame.box)
+    crop_box = list(frame.box) if frame is not None else [0, 0, *full.size]
     work = fit_long_side(full, cfg.work_max_side)
     work_path = root / "work" / f"{image_id}.png"
     work.save(work_path)
@@ -70,7 +79,10 @@ def ingest_image(
     t["load"] = clock() - t0
 
     t0 = clock()
-    horizon_y, horizon_conf = estimate_horizon(rgb)
+    backdrop = None
+    if frame is not None and frame.backdrop.any() and not frame.fallback:
+        backdrop = np.asarray(Image.fromarray(frame.backdrop.astype(np.uint8) * 255).resize(work.size, Image.NEAREST)) > 0
+    horizon_y, horizon_conf = estimate_horizon(rgb, backdrop=backdrop)
     image_vec = embedder.encode_images([work])[0]
     t["horizon+embed"] = clock() - t0
 
@@ -83,7 +95,7 @@ def ingest_image(
         "title": item.title, "artist": item.artist, "date_text": item.date_text,
         "width": work.width, "height": work.height,
         "orig_path": str(orig_path), "work_path": str(work_path), "sha256": sha256_bytes(image_bytes),
-        "horizon_y": horizon_y, "horizon_conf": horizon_conf, "horizon_checked": 0,
+        "horizon_y": horizon_y, "horizon_conf": horizon_conf, "horizon_checked": 0, "crop_box": crop_box,
         "embedding": vec_to_blob(image_vec), "embedding_model": embedder.name,
         "attrs": None, "judge_version": None, "meta": item.meta,
     })
@@ -95,8 +107,9 @@ def ingest_image(
     t0 = clock()
     labels = segment_map(rgb)
     for c in candidates:
-        c.metrics = compute_metrics(c.mask, labels, cfg.band_frac)
-    kept = select_masks(candidates, cfg.min_area_ratio, cfg.max_area_ratio, cfg.dedupe_iou, cfg.max_cutouts)
+        c.metrics = compute_metrics(c.mask, labels, cfg.band_frac, backdrop)
+    kept = select_masks(candidates, cfg.min_area_ratio, cfg.max_area_ratio, cfg.dedupe_iou, cfg.max_cutouts,
+                        cfg.max_aspect, cfg.min_thickness, cfg.max_backdrop_frac)
     t["metrics"] = clock() - t0
 
     t0 = clock()
@@ -113,7 +126,8 @@ def ingest_image(
             "id": cut_id, "image_id": image_id, "pool": pool, "cutout_path": str(path),
             "x0": x0, "y0": y0, "x1": x1, "y1": y1,
             "area_ratio": m.area_ratio, "centrality": m.centrality, "clutter": m.clutter,
-            "edge_score": m.edge_score, "border_touch": m.border_touch, "mask_quality": c.quality,
+            "edge_score": m.edge_score, "border_touch": m.border_touch, "aspect": m.aspect, "thickness": m.thickness,
+            "mask_quality": c.quality,
             "attrs": None, "judge_version": None,
         })
     vecs = embedder.encode_images(cut_images) if cut_images else np.zeros((0, embedder.dim), np.float32)
