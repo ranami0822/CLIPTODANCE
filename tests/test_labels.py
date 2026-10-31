@@ -130,3 +130,63 @@ def test_numbered_sheets_are_written(tmp_path):
     assert all(Image.open(p).size[0] > 0 for p in paths)
     h = numbered_horizon_sheet([(1, db.get("images", "i1"))], tmp_path / "out" / "h.png", thumb=120, cols=1)
     assert h.exists()
+
+
+# ---------------------------------------------------------------- AI の印(人の印とは別枠)
+
+def test_ai_labels_are_stored_separately_and_never_touch_human_labels(tmp_path):
+    db = make_db(tmp_path)
+    labels.import_usable(db, "p", [1, 2], source="human")
+    labels.import_usable(db, "p", [5, 6], source="ai")
+    rows = db.rows("cutouts")
+    assert [r["usable"] for r in rows] == [1, 1, 0, 0, 0, 0]
+    assert [r["usable_ai"] for r in rows] == [0, 0, 0, 0, 1, 1]
+    db.upsert("images", {"id": "i2", "pool": "p", "source": "s", "source_id": "2", "horizon_y": 0.4, "horizon_auto_y": 0.4, "horizon_conf": 0.5, "horizon_checked": 0})
+    db.commit()
+    labels.import_horizons(db, "p", {1: 0.7}, [2], source="ai")
+    i1, i2 = db.get("images", "i1"), db.get("images", "i2")
+    assert i1["horizon_ai_y"] == 0.7 and i1["horizon_checked"] == 0 and i1["horizon_y"] == 0.6   # 人の印・値は動かない
+    assert i2["horizon_ai_na"] == 1 and i2["horizon_checked"] == 0
+
+
+def test_evaluate_uses_the_requested_source(tmp_path):
+    db = make_db(tmp_path)
+    labels.import_usable(db, "p", [4, 5, 6], source="ai")
+    assert labels.evaluate_cutouts(db, "p", "human")["n_labeled"] == 0
+    ai = labels.evaluate_cutouts(db, "p", "ai")
+    assert ai["source"] == "ai" and ai["n_labeled"] == 6 and ai["n_usable"] == 3
+    labels.import_horizons(db, "p", {1: 0.7}, [], source="ai")
+    h = labels.evaluate_horizons(db, "p", "ai")
+    assert h["n_labeled"] == 1 and h["mean_abs_error"] == pytest.approx(0.1, abs=1e-3)
+    assert labels.evaluate_horizons(db, "p", "human")["n_labeled"] == 0
+
+
+def test_compare_labelers_computes_agreement_and_kappa(tmp_path):
+    db = make_db(tmp_path)
+    labels.import_usable(db, "p", [1, 2, 3], source="human")     # 人: 1,2,3 が使える
+    labels.import_usable(db, "p", [2, 3, 4], source="ai")         # AI: 2,3,4 が使える
+    c = labels.compare_labelers(db, "p")["cutouts"]
+    assert (c["tp"], c["fp"], c["fn"], c["tn"]) == (2, 1, 1, 2) and c["n"] == 6
+    assert c["agreement"] == pytest.approx(4 / 6, abs=1e-3)
+    assert c["kappa"] == pytest.approx(1 / 3, abs=1e-3)          # po=4/6, pe=0.5 → (0.667-0.5)/0.5
+    assert c["ai_precision"] == pytest.approx(2 / 3, abs=1e-3) and c["ai_recall"] == pytest.approx(2 / 3, abs=1e-3)
+
+
+def test_compare_with_only_a_subset_labeled_by_the_human(tmp_path):
+    db = make_db(tmp_path)
+    labels.import_usable(db, "p", [1], upto=2, source="human")    # 人は 1〜2 番だけ
+    labels.import_usable(db, "p", [1, 2], source="ai")            # AI は全部
+    c = labels.compare_labelers(db, "p")["cutouts"]
+    assert c["n"] == 2 and c["tp"] == 1 and c["fp"] == 1          # 比べるのは両方が付いている 2 個だけ
+    assert labels.compare_labelers(PoolDB(tmp_path / "empty.sqlite"), "p")["cutouts"] == {"n": 0}
+
+
+def test_compare_horizon_values_and_na(tmp_path):
+    db = make_db(tmp_path)
+    db.upsert("images", {"id": "i2", "pool": "p", "source": "s", "source_id": "2", "horizon_y": 0.4, "horizon_auto_y": 0.4, "horizon_conf": 0.5, "horizon_checked": 0})
+    db.commit()
+    labels.import_horizons(db, "p", {1: 0.50}, [2], source="human")
+    labels.import_horizons(db, "p", {1: 0.58}, [2], source="ai")
+    h = labels.compare_labelers(db, "p")["horizon"]
+    assert h["n_values"] == 1 and h["mean_abs_error"] == pytest.approx(0.08, abs=1e-3) and h["within_0.10"] == 1 and h["within_0.05"] == 0
+    assert h["na_agreement"] == 1.0

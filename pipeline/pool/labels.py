@@ -57,8 +57,13 @@ def save_numbering(path: Path, cutouts: dict[int, str], images: dict[int, str]) 
     path.write_text(json.dumps({"cutouts": cutouts, "images": images}, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-def import_usable(db: PoolDB, pool: str, usable_numbers: list[int], upto: int | None = None) -> dict:
-    """番号 1〜upto(省略時は全部)のうち、usable_numbers にあるものを使える(1)、ほかを使えない(0)にする。"""
+USABLE_COL = {"human": "usable", "ai": "usable_ai"}
+
+
+def import_usable(db: PoolDB, pool: str, usable_numbers: list[int], upto: int | None = None, source: str = "human") -> dict:
+    """番号 1〜upto(省略時は全部)のうち、usable_numbers にあるものを使える(1)、ほかを使えない(0)にする。
+    source = "human"(あなたの判断)か "ai"(別のモデルの判断。人の印とは別の列に入れる)。"""
+    col = USABLE_COL[source]
     nums = numbering(db, pool)
     limit = upto if upto is not None else max(nums)
     unknown = [n for n in usable_numbers if n not in nums or n > limit]
@@ -66,28 +71,40 @@ def import_usable(db: PoolDB, pool: str, usable_numbers: list[int], upto: int | 
         raise ValueError(f"範囲外の番号: {unknown}")
     good = set(usable_numbers)
     for n in range(1, limit + 1):
-        db.update("cutouts", nums[n], usable=1 if n in good else 0)
+        db.update("cutouts", nums[n], **{col: 1 if n in good else 0})
     db.commit()
     return {"labeled": limit, "usable": len(good), "not_usable": limit - len(good)}
 
 
-def import_horizons(db: PoolDB, pool: str, values: dict[int, float], not_applicable: list[int], accept_rest: bool = False) -> dict:
+def import_horizons(db: PoolDB, pool: str, values: dict[int, float], not_applicable: list[int], accept_rest: bool = False,
+                    source: str = "human") -> dict:
     """values = 直す画像(番号 → 正しい高さ)、not_applicable = 地平線のない絵。
     accept_rest=True なら、どちらにも挙がらない画像は「自動の線で良い」として確認済み(値は自動の値のまま)にする。"""
     nums = image_numbering(db, pool)
     bad = [n for n in [*values, *not_applicable] if n not in nums]
     if bad:
         raise ValueError(f"範囲外の番号: {bad}")
-    for n, y in values.items():
-        db.update("images", nums[n], horizon_y=y, horizon_checked=1)
-    for n in not_applicable:
-        db.update("images", nums[n], horizon_checked=2)
     accepted = 0
-    if accept_rest:
-        for n, iid in nums.items():
-            if n not in values and n not in not_applicable:
-                db.update("images", iid, horizon_checked=1)  # horizon_y は自動の値のまま
-                accepted += 1
+    if source == "human":
+        for n, y in values.items():
+            db.update("images", nums[n], horizon_y=y, horizon_checked=1)
+        for n in not_applicable:
+            db.update("images", nums[n], horizon_checked=2)
+        if accept_rest:
+            for n, iid in nums.items():
+                if n not in values and n not in not_applicable:
+                    db.update("images", iid, horizon_checked=1)  # horizon_y は自動の値のまま
+                    accepted += 1
+    else:  # AI の印は別の列。horizon_y / horizon_checked(人の印)には触れない
+        for n, y in values.items():
+            db.update("images", nums[n], horizon_ai_y=y, horizon_ai_na=0)
+        for n in not_applicable:
+            db.update("images", nums[n], horizon_ai_y=None, horizon_ai_na=1)
+        if accept_rest:
+            for n, iid in nums.items():
+                if n not in values and n not in not_applicable:
+                    db.update("images", iid, horizon_ai_y=db.get("images", iid)["horizon_auto_y"], horizon_ai_na=0)
+                    accepted += 1
     db.commit()
     return {"set": len(values), "not_applicable": len(not_applicable), "accepted_auto": accepted}
 
@@ -118,12 +135,13 @@ def _features(r: dict) -> dict[str, float | None]:
     return f
 
 
-def evaluate_cutouts(db: PoolDB, pool: str) -> dict:
-    rows = [r for r in db.rows("cutouts", "pool = ? AND usable IS NOT NULL", (pool,))]
-    out: dict = {"n_labeled": len(rows), "n_usable": sum(r["usable"] for r in rows)}
+def evaluate_cutouts(db: PoolDB, pool: str, source: str = "human") -> dict:
+    col = USABLE_COL[source]
+    rows = [r for r in db.rows("cutouts", f"pool = ? AND {col} IS NOT NULL", (pool,))]
+    out: dict = {"source": source, "n_labeled": len(rows), "n_usable": sum(r[col] for r in rows)}
     if not rows:
         return out
-    y = [bool(r["usable"]) for r in rows]
+    y = [bool(r[col]) for r in rows]
     feats = [_features(r) for r in rows]
     table = []
     for name in sorted({k for f in feats for k in f}):
@@ -137,8 +155,8 @@ def evaluate_cutouts(db: PoolDB, pool: str) -> dict:
     judged = [(r, f) for r, f in zip(rows, feats) if f.get("clef:single_object") is not None]
     if judged:
         def rate(pred):
-            tp = sum(1 for r, f in judged if pred(f) and r["usable"]); fp = sum(1 for r, f in judged if pred(f) and not r["usable"])
-            fn = sum(1 for r, f in judged if not pred(f) and r["usable"]); tn = sum(1 for r, f in judged if not pred(f) and not r["usable"])
+            tp = sum(1 for r, f in judged if pred(f) and r[col]); fp = sum(1 for r, f in judged if pred(f) and not r[col])
+            fn = sum(1 for r, f in judged if not pred(f) and r[col]); tn = sum(1 for r, f in judged if not pred(f) and not r[col])
             n = tp + fp + fn + tn
             return {"n": n, "accuracy": round((tp + tn) / n, 3), "precision": round(tp / (tp + fp), 3) if tp + fp else None,
                     "recall": round(tp / (tp + fn), 3) if tp + fn else None, "tp": tp, "fp": fp, "fn": fn, "tn": tn}
@@ -148,12 +166,19 @@ def evaluate_cutouts(db: PoolDB, pool: str) -> dict:
     return out
 
 
-def evaluate_horizons(db: PoolDB, pool: str) -> dict:
-    rows = db.rows("images", "pool = ? AND horizon_checked = 1 AND horizon_auto_y IS NOT NULL", (pool,))
-    out: dict = {"n_labeled": len(rows), "n_not_applicable": len(db.rows("images", "pool = ? AND horizon_checked = 2", (pool,)))}
+def evaluate_horizons(db: PoolDB, pool: str, source: str = "human") -> dict:
+    if source == "human":
+        rows = db.rows("images", "pool = ? AND horizon_checked = 1 AND horizon_auto_y IS NOT NULL", (pool,))
+        n_na = len(db.rows("images", "pool = ? AND horizon_checked = 2", (pool,)))
+        truth = lambda r: r["horizon_y"]
+    else:
+        rows = db.rows("images", "pool = ? AND horizon_ai_y IS NOT NULL AND horizon_auto_y IS NOT NULL", (pool,))
+        n_na = len(db.rows("images", "pool = ? AND horizon_ai_na = 1", (pool,)))
+        truth = lambda r: r["horizon_ai_y"]
+    out: dict = {"source": source, "n_labeled": len(rows), "n_not_applicable": n_na}
     if not rows:
         return out
-    err = np.array([abs(r["horizon_auto_y"] - r["horizon_y"]) for r in rows])
+    err = np.array([abs(r["horizon_auto_y"] - truth(r)) for r in rows])
     conf = np.array([r["horizon_conf"] for r in rows])
     out.update({
         "mean_abs_error": round(float(err.mean()), 3), "median_abs_error": round(float(np.median(err)), 3),
@@ -162,6 +187,38 @@ def evaluate_horizons(db: PoolDB, pool: str) -> dict:
     if len(rows) >= 5 and conf.std() > 0 and err.std() > 0:
         rho = spearmanr(conf, -err).statistic  # 確信度が高いほど誤差が小さければ正
         out["confidence_vs_accuracy_spearman"] = round(float(rho), 3)
-    out["per_image"] = [{"id": r["id"], "auto": round(r["horizon_auto_y"], 3), "label": round(r["horizon_y"], 3),
-                         "error": round(abs(r["horizon_auto_y"] - r["horizon_y"]), 3), "conf": round(r["horizon_conf"], 2)} for r in rows]
+    out["per_image"] = [{"id": r["id"], "auto": round(r["horizon_auto_y"], 3), "label": round(truth(r), 3),
+                         "error": round(abs(r["horizon_auto_y"] - truth(r)), 3), "conf": round(r["horizon_conf"], 2)} for r in rows]
+    return out
+
+
+def compare_labelers(db: PoolDB, pool: str) -> dict:
+    """AI の印が、人の印とどれだけ一致するか(人の印を正解として)。両方が付いているものだけを数える。
+
+    切り抜き: 一致率・Cohen の κ(偶然の一致を除いた一致。0 = 偶然と同じ、1 = 完全)・AI が「使える」としたものの適合率と再現率。
+    地平線: 人が値を付けた画像で、AI の値との誤差。人と AI が「地平線なし」で一致するか。
+    """
+    rows = db.rows("cutouts", "pool = ? AND usable IS NOT NULL AND usable_ai IS NOT NULL", (pool,))
+    out: dict = {"cutouts": {"n": len(rows)}}
+    if rows:
+        tp = sum(1 for r in rows if r["usable_ai"] and r["usable"]); fp = sum(1 for r in rows if r["usable_ai"] and not r["usable"])
+        fn = sum(1 for r in rows if not r["usable_ai"] and r["usable"]); tn = sum(1 for r in rows if not r["usable_ai"] and not r["usable"])
+        n = len(rows)
+        po = (tp + tn) / n
+        pe = ((tp + fp) * (tp + fn) + (fn + tn) * (fp + tn)) / n ** 2
+        out["cutouts"].update({
+            "agreement": round(po, 3), "kappa": round((po - pe) / (1 - pe), 3) if pe < 1 else None,
+            "ai_precision": round(tp / (tp + fp), 3) if tp + fp else None, "ai_recall": round(tp / (tp + fn), 3) if tp + fn else None,
+            "tp": tp, "fp": fp, "fn": fn, "tn": tn, "human_usable_rate": round((tp + fn) / n, 3),
+        })
+    imgs = db.rows("images", "pool = ?", (pool,))
+    both = [r for r in imgs if r["horizon_checked"] == 1 and r["horizon_ai_y"] is not None]
+    na_pairs = [r for r in imgs if r["horizon_checked"] in (1, 2) and (r["horizon_ai_na"] is not None)]
+    h: dict = {"n_values": len(both), "n_na_compared": len(na_pairs)}
+    if both:
+        e = np.array([abs(r["horizon_y"] - r["horizon_ai_y"]) for r in both])
+        h.update({"mean_abs_error": round(float(e.mean()), 3), "within_0.05": int((e <= 0.05).sum()), "within_0.10": int((e <= 0.10).sum())})
+    if na_pairs:
+        h["na_agreement"] = round(sum(1 for r in na_pairs if (r["horizon_checked"] == 2) == bool(r["horizon_ai_na"])) / len(na_pairs), 3)
+    out["horizon"] = h
     return out

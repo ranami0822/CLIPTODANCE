@@ -162,19 +162,20 @@ def cmd_import_labels(a) -> None:
 
     db = open_db(a.pool)
     if a.usable is not None:
-        print("usable:", labels.import_usable(db, a.pool, labels.parse_numbers(a.usable), upto=a.upto))
+        print(f"usable({a.source}):", labels.import_usable(db, a.pool, labels.parse_numbers(a.usable), upto=a.upto, source=a.source))
     if a.horizon or a.horizon_na or a.horizon_rest_ok:
         vals = labels.parse_horizon_values(a.horizon) if a.horizon else {}
         na = labels.parse_numbers(a.horizon_na) if a.horizon_na else []
-        print("horizon:", labels.import_horizons(db, a.pool, vals, na, accept_rest=a.horizon_rest_ok))
+        print(f"horizon({a.source}):", labels.import_horizons(db, a.pool, vals, na, accept_rest=a.horizon_rest_ok, source=a.source))
 
 
 def cmd_eval(a) -> None:
     from pipeline.pool import labels
 
     db = open_db(a.pool)
-    res = {"cutouts": labels.evaluate_cutouts(db, a.pool), "horizon": labels.evaluate_horizons(db, a.pool)}
-    out = pool_root(a.pool) / "eval.json"
+    res = {"cutouts": labels.evaluate_cutouts(db, a.pool, a.source), "horizon": labels.evaluate_horizons(db, a.pool, a.source)}
+    out = pool_root(a.pool) / f"eval_{a.source}.json"
+    print(f"== 正解の出どころ: {a.source} ==")
     out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     c, h = res["cutouts"], res["horizon"]
     print(f"[切り抜き] 判定済み {c['n_labeled']} 個(使える {c.get('n_usable', 0)} 個)")
@@ -190,6 +191,13 @@ def cmd_eval(a) -> None:
         if k in h:
             print(f"  {k}: {h[k]}")
     print(f"詳細: {out}")
+
+
+def cmd_compare(a) -> None:
+    from pipeline.pool import labels
+
+    res = labels.compare_labelers(open_db(a.pool), a.pool)
+    print(json.dumps(res, ensure_ascii=False, indent=1))
 
 
 def cmd_stats(a) -> None:
@@ -233,7 +241,10 @@ def main() -> None:
     p.add_argument("--horizon", help="地平線の正解。例: 3=0.45,5=0.60(画像の番号=高さ、上が0)")
     p.add_argument("--horizon-na", help="地平線のない絵(対象外)の画像の番号。例: 2,7")
     p.add_argument("--horizon-rest-ok", action="store_true", help="上のどちらにも挙げなかった画像は、自動の線で良いものとして確認済みにする")
-    add("eval", cmd_eval)
+    p.add_argument("--source", choices=["human", "ai"], default="human", help="印の出どころ。ai は別のモデルの判断で、人の印とは別に保存する")
+    p = add("eval", cmd_eval)
+    p.add_argument("--source", choices=["human", "ai"], default="human")
+    add("compare", cmd_compare)
     add("stats", cmd_stats)
     a = ap.parse_args()
     a.fn(a)

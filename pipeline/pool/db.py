@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS images (
     horizon_y REAL, horizon_conf REAL,      -- 0-1(上が0)。初期値は軽い処理(R3a)
     horizon_checked INTEGER NOT NULL DEFAULT 0,  -- 0 = 未確認、1 = 目視で確認(値は horizon_y)、2 = 地平線のない絵(対象外)
     horizon_auto_y REAL,                    -- 自動推定の値(手で直しても残す。誤差の測定用)
+    horizon_ai_y REAL, horizon_ai_na INTEGER,  -- AI(別のモデル)が付けた印。人の印(horizon_y / horizon_checked)とは混ぜない
     crop_box TEXT,                          -- 元画像上の内容部分 [x0,y0,x1,y1](額縁・余白を除いた範囲)
     embedding BLOB, embedding_model TEXT,   -- 画像全体の埋め込み(土台の検索用)
     attrs TEXT, judge_version TEXT,
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS cutouts (
     embedding BLOB, embedding_model TEXT,             -- 切り抜きの埋め込み(検索用)
     attrs TEXT, judge_version TEXT,
     usable INTEGER,                                   -- 人の判定(1 = 使える、0 = 使えない、NULL = 未判定)
+    usable_ai INTEGER,                                -- AI(別のモデル)の判定。人の判定とは混ぜない
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS cutouts_image ON cutouts(image_id);
@@ -54,7 +56,8 @@ _JSON_COLS = {"attrs", "meta", "crop_box"}
 
 # 後から足した列(古い DB に ALTER TABLE で足す)
 _ADDED_COLUMNS = [("images", "crop_box", "TEXT"), ("cutouts", "aspect", "REAL"), ("cutouts", "thickness", "REAL"),
-                  ("images", "horizon_auto_y", "REAL"), ("cutouts", "usable", "INTEGER")]
+                  ("images", "horizon_auto_y", "REAL"), ("cutouts", "usable", "INTEGER"),
+                  ("cutouts", "usable_ai", "INTEGER"), ("images", "horizon_ai_y", "REAL"), ("images", "horizon_ai_na", "INTEGER")]
 
 
 def vec_to_blob(vec: np.ndarray) -> bytes:
