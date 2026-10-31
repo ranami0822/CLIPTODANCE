@@ -106,6 +106,22 @@ def import_usable(db: PoolDB, pool: str, usable_numbers: list[int], upto: int | 
     return {"labeled": limit - start + 1, "usable": len(good), "not_usable": limit - start + 1 - len(good)}
 
 
+def import_marks(db: PoolDB, pool: str, universe: list[int], single: list[int], repeat: list[int], source: str = "human") -> dict:
+    """連続していない番号(universe)だけに、「単体で使える」と「反復して使える」の印を付ける。
+    universe の中で single / repeat に挙げたものを 1、ほかを 0 にする。universe の外は触らない(抜き取り確認用)。"""
+    nums = numbering(db, pool)
+    uni = set(universe)
+    bad = [n for n in [*universe, *single, *repeat] if n not in nums]
+    outside = [n for n in [*single, *repeat] if n not in uni]
+    if bad or outside:
+        raise ValueError(f"範囲外の番号: {sorted(set(bad + outside))}")
+    ucol, rcol = USABLE_COL[source], REPEAT_COL[source]
+    for n in sorted(uni):
+        db.update("cutouts", nums[n], **{ucol: 1 if n in set(single) else 0, rcol: 1 if n in set(repeat) else 0})
+    db.commit()
+    return {"labeled": len(uni), "single": len(set(single)), "repeat": len(set(repeat))}
+
+
 def import_horizons(db: PoolDB, pool: str, values: dict[int, float], not_applicable: list[int], accept_rest: bool = False,
                     source: str = "human") -> dict:
     """values = 直す画像(番号 → 正しい高さ)、not_applicable = 地平線のない絵。

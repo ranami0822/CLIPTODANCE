@@ -282,3 +282,14 @@ def test_start_leaves_earlier_numbers_untouched(tmp_path):
     assert [r["repeat_claude"] for r in rows] == [None, None, 0, 0, 1, 0]
     with pytest.raises(ValueError):
         labels.import_usable(db, "p", [2], start=3, source="claude")   # start より前の番号は指定できない
+
+
+def test_import_marks_labels_only_the_given_numbers_with_both_flags(tmp_path):
+    db = make_db(tmp_path)
+    out = labels.import_marks(db, "p", [2, 4, 5], single=[2], repeat=[4, 5], source="human")
+    assert out == {"labeled": 3, "single": 1, "repeat": 2}
+    assert [(r["usable"], r["repeat"]) for r in db.rows("cutouts")] == [(None, None), (1, 0), (None, None), (0, 1), (0, 1), (None, None)]
+    with pytest.raises(ValueError):
+        labels.import_marks(db, "p", [2], single=[3], repeat=[], source="human")   # universe の外
+    with pytest.raises(ValueError):
+        labels.import_marks(db, "p", [99], single=[], repeat=[])

@@ -161,6 +161,10 @@ def cmd_import_labels(a) -> None:
     from pipeline.pool import labels
 
     db = open_db(a.pool)
+    if a.only is not None:
+        only = labels.parse_numbers(a.only)
+        print(f"marks({a.source}):", labels.import_marks(db, a.pool, only, labels.parse_numbers(a.usable or ""), labels.parse_numbers(a.repeat or ""), source=a.source))
+        return
     if a.usable is not None:
         print(f"usable({a.source}):", labels.import_usable(db, a.pool, labels.parse_numbers(a.usable), upto=a.upto, source=a.source, start=a.start))
     if a.repeat is not None:
@@ -245,6 +249,7 @@ def main() -> None:
     p = add("import-labels", cmd_import_labels)
     p.add_argument("--usable", help="使える切り抜きの番号。例: 1,3,5-9(ほかは使えない扱い)")
     p.add_argument("--upto", type=int, help="この番号までを判定済みとする(省略時は全部)")
+    p.add_argument("--only", help="連続していない番号だけに印を付ける(抜き取り確認用)。--usable と --repeat は、この中の番号で指定する")
     p.add_argument("--start", type=int, default=1, help="この番号からを判定済みとする(省略時は 1)。それより前は触らない")
     p.add_argument("--repeat", help="反復素材として使える切り抜きの番号(単体では使えないもののうち)。例: 2,5,9-11")
     p.add_argument("--horizon", help="地平線の正解。例: 3=0.45,5=0.60(画像の番号=高さ、上が0)")
