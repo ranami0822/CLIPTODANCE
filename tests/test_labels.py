@@ -99,7 +99,7 @@ def test_horizon_import_and_error_are_measured_against_the_auto_value(tmp_path):
     db.upsert("images", {"id": "i2", "pool": "p", "source": "s", "source_id": "2", "horizon_y": 0.3, "horizon_auto_y": 0.3, "horizon_conf": 0.5, "horizon_checked": 0})
     db.upsert("images", {"id": "i3", "pool": "p", "source": "s", "source_id": "3", "horizon_y": 0.5, "horizon_auto_y": 0.5, "horizon_conf": 0.9, "horizon_checked": 0})
     db.commit()
-    assert labels.import_horizons(db, "p", {1: 0.62, 2: 0.5}, [3]) == {"set": 2, "not_applicable": 1}
+    assert labels.import_horizons(db, "p", {1: 0.62, 2: 0.5}, [3]) == {"set": 2, "not_applicable": 1, "accepted_auto": 0}
     i1 = db.get("images", "i1")
     assert i1["horizon_y"] == 0.62 and i1["horizon_auto_y"] == 0.6 and i1["horizon_checked"] == 1  # 自動の値は残る
     res = labels.evaluate_horizons(db, "p")
