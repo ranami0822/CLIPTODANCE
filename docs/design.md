@@ -223,6 +223,17 @@ Clefは選択と採点を担当する判定モデル、Clairicは数値を出す
 
 実装の境界(案): `Judge`(選択・採点)と `Estimator`(数値推定)の2つのインターフェースを切り、最初はCloudflareのREST実装で埋める。Clefの重みはApache 2.0でHugging Faceにあるため、将来ローカル実装に差し替えられる。
 
+実装の境界(2026-10-31 作り直し。`adapters/` に実装済み):
+
+- `Judge.ask(questions, images, context)` は、質問を**まとめて**受けて、渡した順の結果と使用量(`Usage`: API 呼び出し数・キャッシュ命中数・ニューロン消費・遅延)を返す。上限(質問数・画像数)は抽象側でなく、実装ごとの `capabilities` が持つ(Clef は 64 問・4 枚)。上限を超える質問数は `ask_in_chunks` が分けて送る。
+- 結果の型は `NoulResult` / `ChoiceResult` / `ScoreResult`。すべて `question_id` と `cached` を持つ。
+- キャッシュは `CachedJudge`(SQLite)。キー = (画像のハッシュ, 正規化した質問, model_id, context)。質問の `id` はキーに入れない。命中しない質問だけを中身に尋ねる。失敗はキャッシュしない。
+- 失敗は例外(`InvalidRequest` / `BudgetExceeded` / `RateLimited` / `ApiError`)で返す。縮退モードは設けないので、握りつぶして代わりの値を返さない。
+- `Estimator.estimate(text, fields, images, context)` は、項目に型・単位・範囲(`EstimateField`)を持たせ、値と確信度・80%範囲(`EstimateValue`)を返す。
+- `FakeJudge` が外部通信なしで Clef と同じ上限の検査をする。テストと、パイプライン側の開発に使う。
+- 未決: Clef の「状態」(`context`)の形式、透明部分のある切り抜きを何色で埋めて渡すか、`ScoreResult` の段階ラベルと数値(1〜5)の対応。いずれも公式ドキュメントの確認後に決める。
+- 「ローカル CLIP に差し替えられる」は、`Judge`(質問に答える形)の単位では成り立たない。差し替えは、工程単位(配置・属性付け・採点)のインターフェースを切ったうえで行う(次の作業)。
+
 ## パッチ選択
 
 Sketch2Photoの「フィルタで候補を絞り、組み合わせに点を付けて最良を選ぶ」挙動を、事前計算した指標と属性で再現する。以下の数値はすべて初期値の案で、M2で素材を見て調整する。
@@ -397,6 +408,7 @@ Paint by Exampleの土台がStable Diffusion v1.4と古い点は品質面の限�
 
 ## 変更履歴
 
+- 2026-10-31: `Judge` / `Estimator` を作り直し(まとめ送信・上限の分離・使用量・例外・キャッシュ・テスト)。
 - 2026-10-31: R7 の三分割と主役の高さを「目安」とし、規則の検査には使わないと決定(R2a との衝突の解決)。
 - 2026-10-31: 未調査分(配置モデル・LLMレイアウト・構図・なじませ・AutoCollage・CLIPの限界)を調べ、採否を決定。採用: 実寸の種類別表、色分布の距離、Reinhard色補正、評価の限定。保留: TopNet/FOPA、LayoutGPT型、Deep Painterly Harmonization。
 - 2026-10-31: 風景ルールの既存研究調査を追記(Photo Clip Art・HLW を本文で確認、配置学習・LLM レイアウト・CLIP の限界は抜粋のみ)。見直し候補5件は未決。
