@@ -38,7 +38,8 @@ landscape:              # docs/design.md「風景ルール」。R1-R3 は決定�
     scale_mult_range: [0.5, 2.0]   # 案
     rotation_range_deg: [-15, 15]  # 案
   camera_height_m: 1.6           # 案(R5)
-  main_height_ratio: [0.25, 0.60]  # 案(R7) 地上の主役の高さ/画面高さ
+  main_height_ratio: [0.25, 0.60]  # 決定(R7): 目安のみ。補正・除外には使わない(評価の弱い項)
+  main_height_ratio_enforced: false
   max_overlap_ratio: 0.30        # 案(R8)
   allow_out_of_canvas: false     # 案(R8)
   color_transfer:                # 決定(R9): Reinhard 2001(lαβ の平均・標準偏差を転送)
