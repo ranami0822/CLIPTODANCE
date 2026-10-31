@@ -26,7 +26,7 @@ landscape:              # docs/design.md「風景ルール」。R1-R3 は決定�
   horizon:                       # 決定(R3a)
     pool_assets: estimate_then_review   # 取り込み時に推定し、目視で確認・修正
     user_background: estimate_then_confirm  # 実行時に推定し、確認画面で修正
-    method: null                 # 未定。M1 で当たり具合を測って選ぶ
+    method: opencv_light         # 決定。スカイライン由来の初期値(軽い処理)。目視で直す前提
   placement:                     # 決定(R10): Clairic が提案し、規則が補正する
     mode: propose_then_correct   # 規則だけの縮退モードは設けない
     estimator_fields: [x, y_foot, scale_mult, rotation, height_m]
