@@ -23,6 +23,10 @@ canvas:
 landscape:              # docs/design.md「風景ルール」。R1-R3 は決定、他は案(仮置き)
   base: single_landscape_image   # 決定(R1)
   perspective: horizon_foot      # 決定(R3): 地平線 + 足元位置でサイズを決める
+  horizon:                       # 決定(R3a)
+    pool_assets: estimate_then_review   # 取り込み時に推定し、目視で確認・修正
+    user_background: estimate_then_confirm  # 実行時に推定し、確認画面で修正
+    method: null                 # 未定。M1 で当たり具合を測って選ぶ
   camera_height_m: 1.6           # 案(R5)
   main_height_ratio: [0.25, 0.60]  # 案(R7) 地上の主役の高さ/画面高さ
   max_overlap_ratio: 0.30        # 案(R8)
