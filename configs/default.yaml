@@ -19,6 +19,10 @@ loop:
 
 canvas:
   aspect: [3, 2]        # 決定(R2)
+  crop:                 # 土台の切り出し(R2a)
+    horizon_target: 0.667   # 決定: 地平線を下の三分の一(上が0)に置く
+    horizon_tolerance: 0.08 # 案。超えたら減点か除外
+    min_crop_ratio: 0.6     # 案。窓の高さ/元画像の高さの下限(拡大しすぎない)
 
 landscape:              # docs/design.md「風景ルール」。R1-R3 は決定、他は案(仮置き)
   base: single_landscape_image   # 決定(R1)
