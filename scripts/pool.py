@@ -203,7 +203,7 @@ def cmd_eval(a) -> None:
 def cmd_compare(a) -> None:
     from pipeline.pool import labels
 
-    res = labels.compare_labelers(open_db(a.pool), a.pool)
+    res = labels.compare_labelers(open_db(a.pool), a.pool, a.labeler)
     print(json.dumps(res, ensure_ascii=False, indent=1))
 
 
@@ -249,10 +249,11 @@ def main() -> None:
     p.add_argument("--horizon", help="地平線の正解。例: 3=0.45,5=0.60(画像の番号=高さ、上が0)")
     p.add_argument("--horizon-na", help="地平線のない絵(対象外)の画像の番号。例: 2,7")
     p.add_argument("--horizon-rest-ok", action="store_true", help="上のどちらにも挙げなかった画像は、自動の線で良いものとして確認済みにする")
-    p.add_argument("--source", choices=["human", "ai"], default="human", help="印の出どころ。ai は別のモデルの判断で、人の印とは別に保存する")
+    p.add_argument("--source", choices=["human", "ai", "claude"], default="human", help="印の出どころ。ai = Haiku、claude = この作業をしているモデル。人の印とは別に保存する")
     p = add("eval", cmd_eval)
-    p.add_argument("--source", choices=["human", "ai"], default="human")
-    add("compare", cmd_compare)
+    p.add_argument("--source", choices=["human", "ai", "claude"], default="human")
+    p = add("compare", cmd_compare)
+    p.add_argument("--labeler", choices=["ai", "claude"], default="ai", help="人の印と比べる相手(ai = Haiku)")
     add("stats", cmd_stats)
     a = ap.parse_args()
     a.fn(a)

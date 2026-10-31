@@ -246,3 +246,28 @@ def test_compare_repeat_marks_agreement(tmp_path):
     r = labels.compare_labelers(db, "p")["repeat"]
     assert (r["tp"], r["fp"], r["fn"], r["tn"]) == (2, 1, 1, 2) and r["kappa"] == pytest.approx(1 / 3, abs=1e-3)
     assert r["human_repeat_rate"] == 0.5
+
+
+# ---------------------------------------------------------------- 出どころは3つ(human / ai = Haiku / claude)
+
+def test_claude_labels_are_separate_from_human_and_haiku(tmp_path):
+    db = make_db(tmp_path)
+    labels.import_usable(db, "p", [1], source="human"); labels.import_usable(db, "p", [2], source="ai"); labels.import_usable(db, "p", [3], source="claude")
+    labels.import_repeat(db, "p", [4], source="claude")
+    rows = db.rows("cutouts")
+    assert [r["usable"] for r in rows][:4] == [1, 0, 0, 0] and [r["usable_ai"] for r in rows][:4] == [0, 1, 0, 0]
+    assert [r["usable_claude"] for r in rows][:4] == [0, 0, 1, 0] and [r["repeat_claude"] for r in rows][:4] == [0, 0, 0, 1]
+    assert all(r["repeat"] is None and r["repeat_ai"] is None for r in rows)
+
+
+def test_compare_and_horizon_work_for_the_claude_labeler(tmp_path):
+    db = make_db(tmp_path)
+    labels.import_usable(db, "p", [1, 2, 3], source="human")
+    labels.import_usable(db, "p", [2, 3, 4], source="claude")
+    c = labels.compare_labelers(db, "p", "claude")
+    assert c["labeler"] == "claude" and (c["cutouts"]["tp"], c["cutouts"]["fp"], c["cutouts"]["fn"], c["cutouts"]["tn"]) == (2, 1, 1, 2)
+    assert labels.compare_labelers(db, "p", "ai")["cutouts"] == {"n": 0}   # Haiku の印はまだない
+    labels.import_horizons(db, "p", {1: 0.7}, [], source="claude")
+    i1 = db.get("images", "i1")
+    assert i1["horizon_claude_y"] == 0.7 and i1["horizon_ai_y"] is None and i1["horizon_checked"] == 0
+    assert labels.evaluate_horizons(db, "p", "claude")["n_labeled"] == 1

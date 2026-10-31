@@ -57,8 +57,9 @@ def save_numbering(path: Path, cutouts: dict[int, str], images: dict[int, str]) 
     path.write_text(json.dumps({"cutouts": cutouts, "images": images}, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-USABLE_COL = {"human": "usable", "ai": "usable_ai"}
-REPEAT_COL = {"human": "repeat", "ai": "repeat_ai"}
+USABLE_COL = {"human": "usable", "ai": "usable_ai", "claude": "usable_claude"}   # ai = Haiku
+REPEAT_COL = {"human": "repeat", "ai": "repeat_ai", "claude": "repeat_claude"}
+HORIZON_COLS = {"ai": ("horizon_ai_y", "horizon_ai_na"), "claude": ("horizon_claude_y", "horizon_claude_na")}
 ROLES = ("both", "single", "repeat", "none")  # 単体でも反復でも使える / 単体だけ / 反復だけ / 使えない
 
 
@@ -121,15 +122,16 @@ def import_horizons(db: PoolDB, pool: str, values: dict[int, float], not_applica
                 if n not in values and n not in not_applicable:
                     db.update("images", iid, horizon_checked=1)  # horizon_y は自動の値のまま
                     accepted += 1
-    else:  # AI の印は別の列。horizon_y / horizon_checked(人の印)には触れない
+    else:  # 人以外の印は別の列。horizon_y / horizon_checked(人の印)には触れない
+        ycol, nacol = HORIZON_COLS[source]
         for n, y in values.items():
-            db.update("images", nums[n], horizon_ai_y=y, horizon_ai_na=0)
+            db.update("images", nums[n], **{ycol: y, nacol: 0})
         for n in not_applicable:
-            db.update("images", nums[n], horizon_ai_y=None, horizon_ai_na=1)
+            db.update("images", nums[n], **{ycol: None, nacol: 1})
         if accept_rest:
             for n, iid in nums.items():
                 if n not in values and n not in not_applicable:
-                    db.update("images", iid, horizon_ai_y=db.get("images", iid)["horizon_auto_y"], horizon_ai_na=0)
+                    db.update("images", iid, **{ycol: db.get("images", iid)["horizon_auto_y"], nacol: 0})
                     accepted += 1
     db.commit()
     return {"set": len(values), "not_applicable": len(not_applicable), "accepted_auto": accepted}
@@ -208,9 +210,10 @@ def evaluate_horizons(db: PoolDB, pool: str, source: str = "human") -> dict:
         n_na = len(db.rows("images", "pool = ? AND horizon_checked = 2", (pool,)))
         truth = lambda r: r["horizon_y"]
     else:
-        rows = db.rows("images", "pool = ? AND horizon_ai_y IS NOT NULL AND horizon_auto_y IS NOT NULL", (pool,))
-        n_na = len(db.rows("images", "pool = ? AND horizon_ai_na = 1", (pool,)))
-        truth = lambda r: r["horizon_ai_y"]
+        ycol, nacol = HORIZON_COLS[source]
+        rows = db.rows("images", f"pool = ? AND {ycol} IS NOT NULL AND horizon_auto_y IS NOT NULL", (pool,))
+        n_na = len(db.rows("images", f"pool = ? AND {nacol} = 1", (pool,)))
+        truth = lambda r: r[ycol]
     out: dict = {"source": source, "n_labeled": len(rows), "n_not_applicable": n_na}
     if not rows:
         return out
@@ -228,17 +231,19 @@ def evaluate_horizons(db: PoolDB, pool: str, source: str = "human") -> dict:
     return out
 
 
-def compare_labelers(db: PoolDB, pool: str) -> dict:
-    """AI の印が、人の印とどれだけ一致するか(人の印を正解として)。両方が付いているものだけを数える。
+def compare_labelers(db: PoolDB, pool: str, labeler: str = "ai") -> dict:
+    """labeler(ai = Haiku、claude)の印が、人の印とどれだけ一致するか(人の印を正解として)。両方が付いているものだけを数える。
 
     切り抜き: 一致率・Cohen の κ(偶然の一致を除いた一致。0 = 偶然と同じ、1 = 完全)・AI が「使える」としたものの適合率と再現率。
     地平線: 人が値を付けた画像で、AI の値との誤差。人と AI が「地平線なし」で一致するか。
     """
-    rows = db.rows("cutouts", "pool = ? AND usable IS NOT NULL AND usable_ai IS NOT NULL", (pool,))
-    out: dict = {"cutouts": {"n": len(rows)}}
+    uc, rc = USABLE_COL[labeler], REPEAT_COL[labeler]
+    ycol, nacol = HORIZON_COLS[labeler]
+    rows = db.rows("cutouts", f"pool = ? AND usable IS NOT NULL AND {uc} IS NOT NULL", (pool,))
+    out: dict = {"labeler": labeler, "cutouts": {"n": len(rows)}}
     if rows:
-        tp = sum(1 for r in rows if r["usable_ai"] and r["usable"]); fp = sum(1 for r in rows if r["usable_ai"] and not r["usable"])
-        fn = sum(1 for r in rows if not r["usable_ai"] and r["usable"]); tn = sum(1 for r in rows if not r["usable_ai"] and not r["usable"])
+        tp = sum(1 for r in rows if r[uc] and r["usable"]); fp = sum(1 for r in rows if r[uc] and not r["usable"])
+        fn = sum(1 for r in rows if not r[uc] and r["usable"]); tn = sum(1 for r in rows if not r[uc] and not r["usable"])
         n = len(rows)
         po = (tp + tn) / n
         pe = ((tp + fp) * (tp + fn) + (fn + tn) * (fp + tn)) / n ** 2
@@ -247,22 +252,22 @@ def compare_labelers(db: PoolDB, pool: str) -> dict:
             "ai_precision": round(tp / (tp + fp), 3) if tp + fp else None, "ai_recall": round(tp / (tp + fn), 3) if tp + fn else None,
             "tp": tp, "fp": fp, "fn": fn, "tn": tn, "human_usable_rate": round((tp + fn) / n, 3),
         })
-    rrows = db.rows("cutouts", "pool = ? AND repeat IS NOT NULL AND repeat_ai IS NOT NULL", (pool,))
+    rrows = db.rows("cutouts", f"pool = ? AND repeat IS NOT NULL AND {rc} IS NOT NULL", (pool,))
     if rrows:
-        tp = sum(1 for r in rrows if r["repeat_ai"] and r["repeat"]); fp = sum(1 for r in rrows if r["repeat_ai"] and not r["repeat"])
-        fn = sum(1 for r in rrows if not r["repeat_ai"] and r["repeat"]); tn = sum(1 for r in rrows if not r["repeat_ai"] and not r["repeat"])
+        tp = sum(1 for r in rrows if r[rc] and r["repeat"]); fp = sum(1 for r in rrows if r[rc] and not r["repeat"])
+        fn = sum(1 for r in rrows if not r[rc] and r["repeat"]); tn = sum(1 for r in rrows if not r[rc] and not r["repeat"])
         n = len(rrows); po = (tp + tn) / n; pe = ((tp + fp) * (tp + fn) + (fn + tn) * (fp + tn)) / n ** 2
         out["repeat"] = {"n": n, "agreement": round(po, 3), "kappa": round((po - pe) / (1 - pe), 3) if pe < 1 else None,
                          "ai_precision": round(tp / (tp + fp), 3) if tp + fp else None, "ai_recall": round(tp / (tp + fn), 3) if tp + fn else None,
                          "tp": tp, "fp": fp, "fn": fn, "tn": tn, "human_repeat_rate": round((tp + fn) / n, 3)}
     imgs = db.rows("images", "pool = ?", (pool,))
-    both = [r for r in imgs if r["horizon_checked"] == 1 and r["horizon_ai_y"] is not None]
-    na_pairs = [r for r in imgs if r["horizon_checked"] in (1, 2) and (r["horizon_ai_na"] is not None)]
+    both = [r for r in imgs if r["horizon_checked"] == 1 and r[ycol] is not None]
+    na_pairs = [r for r in imgs if r["horizon_checked"] in (1, 2) and (r[nacol] is not None)]
     h: dict = {"n_values": len(both), "n_na_compared": len(na_pairs)}
     if both:
-        e = np.array([abs(r["horizon_y"] - r["horizon_ai_y"]) for r in both])
+        e = np.array([abs(r["horizon_y"] - r[ycol]) for r in both])
         h.update({"mean_abs_error": round(float(e.mean()), 3), "within_0.05": int((e <= 0.05).sum()), "within_0.10": int((e <= 0.10).sum())})
     if na_pairs:
-        h["na_agreement"] = round(sum(1 for r in na_pairs if (r["horizon_checked"] == 2) == bool(r["horizon_ai_na"])) / len(na_pairs), 3)
+        h["na_agreement"] = round(sum(1 for r in na_pairs if (r["horizon_checked"] == 2) == bool(r[nacol])) / len(na_pairs), 3)
     out["horizon"] = h
     return out
