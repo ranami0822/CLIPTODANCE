@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+*.egg-info/
+.pytest_cache/
+# 素材・索引・ログは大きく権利物を含むためコミットしない(data/.gitkeep のみ追跡)
+data/*
+!data/.gitkeep
+outputs/

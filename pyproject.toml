@@ -1,0 +1,17 @@
+[project]
+name = "cliptodance"
+version = "0.0.1"
+description = "画像検索コラージュAI(草案: docs/design.md)"
+requires-python = ">=3.10"
+# M0 時点では実行に必須の依存はない。重い依存(torch, open_clip, segment-anything, faiss 等)は
+# 本番(GPU / Colab)で M1 以降に追加する。
+dependencies = ["pyyaml>=6", "requests>=2.31"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["pipeline", "adapters"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

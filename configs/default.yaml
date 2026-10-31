@@ -1,0 +1,30 @@
+# 値はすべて docs/design.md の初期値の案。M2 以降で素材を見て調整する。
+pool: null              # 素材プール名(洋画・日本画・イラスト・写真 など)
+max_elements: 6         # 要素数の上限
+
+selection:
+  top_k: 50             # 要素ごとのCLIP検索件数 K
+  keep_per_element: 5   # 単体スコア上位 M
+  beam_width: 10        # ビーム幅 B
+  top_n_sets: 3         # 合成へ渡す組数 N
+
+loop:
+  max_retries: 3
+  accept_threshold: null   # 未決定。M4 で調整
+  weights:                 # 未決定。M4 で調整
+    semantic: null
+    naturalness: null
+    consistency: null
+    edge: null
+
+coords:                 # 座標の規約(案)
+  xy: normalized_0_1    # キャンバス幅・高さに対する 0-1
+  z: int_rank           # 手前-奥の順位
+  rotation: degrees_cw  # 時計回り
+
+judge:
+  backend: cloudflare   # 将来 local(Clef の重みは Apache 2.0 で HF にある)に差し替え
+  # 呼び出しは Workers AI REST。トークンは環境変数 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
+  cache_dir: data/judge_cache
+estimator:
+  backend: cloudflare   # Clairic はプレビュー依存。代替: 格子候補 + Clef 採点
