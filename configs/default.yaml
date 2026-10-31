@@ -17,10 +17,22 @@ loop:
     consistency: null
     edge: null
 
-coords:                 # 座標の規約(案)
-  xy: normalized_0_1    # キャンバス幅・高さに対する 0-1
-  z: int_rank           # 手前-奥の順位
-  rotation: degrees_cw  # 時計回り
+canvas:
+  aspect: [3, 2]        # 決定(R2)
+
+landscape:              # docs/design.md「風景ルール」。R1-R3 は決定、他は案(仮置き)
+  base: single_landscape_image   # 決定(R1)
+  perspective: horizon_foot      # 決定(R3): 地平線 + 足元位置でサイズを決める
+  camera_height_m: 1.6           # 案(R5)
+  main_height_ratio: [0.25, 0.60]  # 案(R7) 地上の主役の高さ/画面高さ
+  max_overlap_ratio: 0.30        # 案(R8)
+  allow_out_of_canvas: false     # 案(R8)
+  color_shift_strength: 0.2      # 案(R9)
+
+coords:                 # 座標の規約(案)。地上物は足元中央、空中物は中心
+  xy: normalized_0_1    # キャンバス幅・高さに対する 0-1、上が y=0
+  z: derived_from_y_foot  # R6: 足元 y の小さい順に奥から重ねる
+  rotation: degrees_cw  # 時計回り。足元(空中物は中心)が回転の中心
 
 judge:
   backend: cloudflare   # 将来 local(Clef の重みは Apache 2.0 で HF にある)に差し替え
