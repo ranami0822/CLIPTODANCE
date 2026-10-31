@@ -1,0 +1,12 @@
+{
+  "text": "A quiet landscape with a horse and a dog in front, a tower and two small boats in the distance, a tree on the side and a cloud in the sky",
+  "base_query": "calm landscape with sky",
+  "elements": [
+    {"name": "horse", "query": "a horse", "kind": "horse", "role": "main"},
+    {"name": "dog", "query": "a dog", "kind": "dog"},
+    {"name": "tower", "query": "a tower", "kind": "tower"},
+    {"name": "boat", "query": "a boat", "kind": "boat", "count": 2},
+    {"name": "tree", "query": "a tree", "kind": "tree"},
+    {"name": "cloud", "query": "a white cloud", "kind": "cloud"}
+  ]
+}

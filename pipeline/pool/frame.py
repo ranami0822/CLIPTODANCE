@@ -62,6 +62,17 @@ def find_backdrop(rgb: np.ndarray, dark: int = 22, light: int = 238, sat_max: in
     return backdrop | fringe
 
 
+def find_black_corners(rgb: np.ndarray, thresh: int = 12) -> np.ndarray:
+    """画像の端につながった、ほぼ純黒(V < thresh)の領域。額縁を除いたあとの画像に残る、アーチ形の絵の黒い四隅を見つける。
+    `find_backdrop` と違い、暗い絵の平らな暗部は拾わない(実画像で、暗い風景が 30% も余白と判定されたため)。"""
+    cand = rgb.max(axis=2) < thresh
+    n, labels = cv2.connectedComponents(cand.astype(np.uint8), connectivity=4)
+    if n <= 1:
+        return np.zeros(cand.shape, bool)
+    edge = np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]]))
+    return np.isin(labels, edge[edge != 0])
+
+
 def _content_box(backdrop: np.ndarray, min_run: float = 0.05) -> tuple[int, int, int, int]:
     """余白でない画素の外接矩形。ごく少数の画素(ノイズ)で広がらないよう、各行・各列の割合で決める。"""
     h, w = backdrop.shape

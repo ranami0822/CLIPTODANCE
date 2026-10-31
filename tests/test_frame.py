@@ -214,3 +214,15 @@ def test_old_database_without_new_columns_is_migrated(tmp_path):
     db.update("images", "a", crop_box=[1, 2, 3, 4])
     db.update("cutouts", "none", aspect=1.0)  # 列があれば例外にならない(0 行の更新)
     assert db.get("images", "a")["crop_box"] == [1, 2, 3, 4]
+
+
+def test_find_black_corners_finds_arch_corners_but_not_dark_flat_paintings():
+    from pipeline.pool.frame import find_black_corners
+    arch = np.full((200, 300, 3), 120, np.uint8)
+    yy, xx = np.mgrid[:200, :300]
+    arch[yy < 60 - xx * 0.5] = 0
+    assert 0.02 < find_black_corners(arch).mean() < 0.2 and find_black_corners(arch)[0, 0]
+    dark_painting = np.full((200, 300, 3), 35, np.uint8)         # 暗いが純黒ではない平らな絵(find_backdrop は余白と誤認する型)
+    assert find_black_corners(dark_painting).mean() == 0.0
+    black_inside = np.full((200, 300, 3), 120, np.uint8); black_inside[80:120, 100:160] = 0   # 端につながらない黒は拾わない
+    assert find_black_corners(black_inside).mean() == 0.0

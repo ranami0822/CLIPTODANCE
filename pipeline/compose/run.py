@@ -1,0 +1,95 @@
+"""要望 → 土台の選択 → 素材の選択 → 配置 → 合成 → 出力(PNG と JSON のログ)。"""
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+import numpy as np
+from PIL import Image
+
+from pipeline.pool.db import PoolDB
+from pipeline.pool.embed import Embedder
+from pipeline.pool.imageops import png_bytes
+
+from .canvas import render_base
+from .heights import HeightTable
+from .placer import Placer
+from .render import RenderConfig, render_collage
+from .select import select_base, select_cutouts
+from .types import CanvasInfo, ElementSpec, Instance
+
+
+@dataclass
+class ComposeRequest:
+    text: str
+    base_query: str
+    elements: list[ElementSpec]
+    canvas_width: int = 1800
+
+    @classmethod
+    def from_json(cls, path: str | Path) -> "ComposeRequest":
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cls(text=d["text"], base_query=d.get("base_query", "landscape"),
+                   elements=[ElementSpec(**e) for e in d["elements"]], canvas_width=d.get("canvas_width", 1800))
+
+
+@dataclass
+class ComposeResult:
+    image: Image.Image
+    base: Image.Image
+    log: dict = field(default_factory=dict)
+
+
+def compose(db: PoolDB, pool: str, embedder: Embedder, placer: Placer, request: ComposeRequest, heights: HeightTable,
+            cfg: RenderConfig | None = None, base_rank: int = 0) -> ComposeResult:
+    t0 = time.monotonic()
+    cfg = cfg or RenderConfig()
+    log: dict = {"request": {"text": request.text, "base_query": request.base_query, "elements": [asdict(e) for e in request.elements]},
+                 "placer": placer.name, "warnings": []}
+
+    bases = select_base(db, pool, embedder, request.base_query)
+    if not bases:
+        raise RuntimeError("土台にできる風景がない(地平線を下の三分の一に置けるものがない)")
+    base = bases[min(base_rank, len(bases) - 1)]
+    src = Image.open(base.row["work_path"]).convert("RGB")
+    canvas_img = render_base(src, base.plan, request.canvas_width)
+    canvas = CanvasInfo(width=canvas_img.width, height=canvas_img.height, horizon_y=base.plan.horizon_y, source_image_id=base.row["id"],
+                        crop_box=base.plan.box, horizon_deviation=base.plan.deviation, horizon_source=base.horizon_source)
+    if base.horizon_source != "human":
+        log["warnings"].append(f"土台の地平線は {base.horizon_source} の値で、あなたの目視の確認がない")
+    log["base"] = {"image_id": base.row["id"], "title": base.row.get("title"), "similarity": round(base.similarity, 4), "crop_box": list(base.plan.box),
+                   "horizon_in_canvas": round(base.plan.horizon_y, 4), "horizon_source": base.horizon_source, "window_ratio": round(base.plan.window_ratio, 3),
+                   "alternatives": [b.row["id"] for b in bases[:5]]}
+
+    instances: list[Instance] = []
+    sprites: dict[str, np.ndarray] = {}
+    used: set[str] = set()
+    chosen_log = []
+    for ei, spec in enumerate(request.elements):
+        entry = heights.get(spec.kind)
+        cands = select_cutouts(db, pool, embedder, spec.query, k=spec.count, exclude=used)
+        if len(cands) < spec.count:
+            log["warnings"].append(f"{spec.name}: 候補が {len(cands)} 個しかない(要求 {spec.count} 個)")
+        for n, c in enumerate(cands):
+            rgba = np.asarray(Image.open(c.row["cutout_path"]).convert("RGBA"))
+            iid = f"e{ei}_{spec.name}_{n}".replace(" ", "_")
+            inst = Instance(id=iid, spec=spec, cutout_id=c.row["id"], height_m=spec.height_m or entry.mean if not entry.airborne else None,
+                            height_frac=entry.height_frac if entry.airborne else None, airborne=entry.airborne,
+                            aspect=rgba.shape[1] / rgba.shape[0])
+            instances.append(inst); sprites[iid] = rgba; used.add(c.row["id"])
+            chosen_log.append({"instance": iid, "cutout_id": c.row["id"], "similarity": round(c.similarity, 4), "label_source": c.label_source,
+                               "cutout_area_ratio": round(c.row["area_ratio"], 4)})
+    log["cutouts"] = chosen_log
+    if not instances:
+        raise RuntimeError("配置する切り抜きが 1 つもない")
+
+    placements = placer.place(request.text, instances, canvas, png_bytes(canvas_img))
+    image, render_log = render_collage(canvas_img, canvas.horizon_y, [(i, sprites[i.id], p) for i, p in zip(instances, placements)], cfg)
+    log["placements"] = [{"instance": i.id, "x": round(p.x, 4), "y": round(p.y, 4), "scale_mult": round(p.scale_mult, 3), "rotation_deg": round(p.rotation_deg, 2),
+                          "x_range80": [round(v, 3) for v in p.x_range80] if p.x_range80 else None,
+                          "y_range80": [round(v, 3) for v in p.y_range80] if p.y_range80 else None} for i, p in zip(instances, placements)]
+    log["render"] = render_log
+    log["seconds"] = round(time.monotonic() - t0, 1)
+    return ComposeResult(image=image, base=canvas_img, log=log)

@@ -69,7 +69,12 @@ class FakeEmbedder:
         return _normalize(np.array(out, np.float32))
 
     def encode_texts(self, texts):
-        return _normalize(np.array([self.WORDS[t] for t in texts], np.float32))
+        def vec(t):
+            for word, v in self.WORDS.items():   # 文の中の最初の色の語で決める("a painting of red" → red)
+                if word in t:
+                    return v
+            raise KeyError(t)
+        return _normalize(np.array([vec(t) for t in texts], np.float32))
 
 
 def make_item(source_id="1"):

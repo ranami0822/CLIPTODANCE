@@ -64,3 +64,31 @@ class FakeJudge:
             usage=Usage(api_calls=1, neurons=self.neurons_per_call),
             model_id=self.model_id,
         )
+
+
+class FakeEstimator:
+    """テスト用の偽の Estimator。`values` に項目名 → 値を渡すと、その値を返す。なければ範囲の中央。外部通信はしない。"""
+
+    def __init__(self, values: dict[str, float] | None = None, max_images: int | None = 4, fail_with: Exception | None = None):
+        self.model_id = "fake-estimator"
+        self.capabilities = JudgeCapabilities(max_questions=None, max_images=max_images)
+        self.values = values or {}
+        self.fail_with = fail_with
+        self.calls: list[dict] = []
+
+    def estimate(self, text, fields, images=()):
+        from .base import EstimateResponse, EstimateValue, FieldKind
+
+        check_capabilities(self.capabilities, len(fields), len(images))
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.calls.append({"text": text, "fields": list(fields), "n_images": len(images)})
+        out = {}
+        for f in fields:
+            if f.kind is FieldKind.ESTIMATE:
+                v = self.values.get(f.name, (f.minimum + f.maximum) / 2)
+                w = 0.1 * (f.maximum - f.minimum)
+                out[f.name] = EstimateValue(name=f.name, value=v, median=v, range80=(max(f.minimum, v - w), min(f.maximum, v + w)))
+            else:
+                out[f.name] = EstimateValue(name=f.name, value=self.values.get(f.name))
+        return EstimateResponse(values=out, usage=Usage(api_calls=1), model_id=self.model_id)

@@ -13,7 +13,8 @@
 | `adapters/` | 判断モデルの差し替え層。`Judge`(Clef 相当)/ `Estimator`(Clairic 相当)のインターフェース、`CachedJudge`(SQLite キャッシュ)、`FakeJudge`(テスト用)、Cloudflare 実装(Clef / Clairic) |
 | `configs/default.yaml` | 設定。数値は設計書の仮置き |
 | `data/` | 素材・索引・キャッシュ(git 管理外) |
-| `scripts/` | 取り込み・実験スクリプト |
+| `scripts/` | 取り込み(`pool.py`)・合成(`compose.py`)・実験スクリプト |
+| `requests/` | 合成の要望(JSON)の例 |
 
 ## 現状
 
