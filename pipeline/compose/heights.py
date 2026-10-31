@@ -15,6 +15,7 @@ class HeightEntry:
     height_frac: float | None  # 空中の物の画面に対する高さの比
     airborne: bool
     source: str
+    habitat: str | None = None   # "water" | "land" | None
 
 
 class HeightTable:
@@ -25,7 +26,7 @@ class HeightTable:
     def load(cls, path: str | Path = "configs/height_table.yaml") -> "HeightTable":
         raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))["entries"]
         return cls({
-            k: HeightEntry(v.get("mean"), v.get("sd"), v.get("width_m"), v.get("height_frac"), bool(v.get("airborne", False)), v.get("source", ""))
+            k: HeightEntry(v.get("mean"), v.get("sd"), v.get("width_m"), v.get("height_frac"), bool(v.get("airborne", False)), v.get("source", ""), v.get("habitat"))
             for k, v in raw.items()
         })
 

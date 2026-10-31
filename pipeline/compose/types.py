@@ -12,6 +12,8 @@ class ElementSpec:
     count: int = 1
     role: str = "prop"        # "main" | "prop"(配置の初期位置と、構図の目安に使う)
     height_m: float | None = None   # 実寸を直接指定するとき(表より優先)
+    habitat: str | None = None      # "water" | "land" | None。水の上にいる(船など)/ 陸にいる(馬など)の指定。None なら表の値、それもなければ制約なし
+    intent: str | None = None       # この要素を置く意図(自由文。配置を Clairic に尋ねるとき、そのまま渡す)
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,7 @@ class Instance:
     airborne: bool
     aspect: float             # 切り抜きの 幅 / 高さ
     width_m: float | None = None   # 幅(長さ)で大きさを決める種類(船など)の実寸(m)。あれば、height_m でなくこちらで決める
+    habitat: str | None = None     # "water" | "land" | None(制約なし)
 
 
 @dataclass(frozen=True)

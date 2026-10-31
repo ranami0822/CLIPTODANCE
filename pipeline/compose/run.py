@@ -15,10 +15,12 @@ from pipeline.pool.imageops import png_bytes
 
 from .canvas import render_base
 from .heights import HeightTable
-from .placer import Placer
+from .habitat import apply_habitat, foot_ok_for
+from .placer import PlaceContext, Placer
 from .render import RenderConfig, render_collage
 from .select import select_base, select_cutouts
 from .types import CanvasInfo, ElementSpec, Instance
+from .water import WaterMap, estimate_water_map
 
 
 @dataclass
@@ -43,7 +45,8 @@ class ComposeResult:
 
 
 def compose(db: PoolDB, pool: str, embedder: Embedder, placer: Placer, request: ComposeRequest, heights: HeightTable,
-            cfg: RenderConfig | None = None, base_rank: int = 0) -> ComposeResult:
+            cfg: RenderConfig | None = None, base_rank: int = 0, judge=None) -> ComposeResult:
+    """judge(Clef 相当)を渡すと、水と陸の地図を作り、habitat(水・陸)の指定を守るよう足元を直す。渡さなければ、水と陸は見ない。"""
     t0 = time.monotonic()
     cfg = cfg or RenderConfig()
     log: dict = {"request": {"text": request.text, "base_query": request.base_query, "elements": [asdict(e) for e in request.elements]},
@@ -79,7 +82,8 @@ def compose(db: PoolDB, pool: str, embedder: Embedder, placer: Placer, request: 
             inst = Instance(id=iid, spec=spec, cutout_id=c.row["id"],
                             height_m=None if (entry.airborne or by_width) else (spec.height_m or entry.mean),
                             height_frac=entry.height_frac if entry.airborne else None, airborne=entry.airborne,
-                            aspect=rgba.shape[1] / rgba.shape[0], width_m=entry.width_m if by_width else None)
+                            aspect=rgba.shape[1] / rgba.shape[0], width_m=entry.width_m if by_width else None,
+                            habitat=None if entry.airborne else (spec.habitat or entry.habitat))
             instances.append(inst); sprites[iid] = rgba; used.add(c.row["id"])
             chosen_log.append({"instance": iid, "cutout_id": c.row["id"], "similarity": round(c.similarity, 4), "label_source": c.label_source,
                                "cutout_area_ratio": round(c.row["area_ratio"], 4)})
@@ -87,8 +91,22 @@ def compose(db: PoolDB, pool: str, embedder: Embedder, placer: Placer, request: 
     if not instances:
         raise RuntimeError("配置する切り抜きが 1 つもない")
 
-    placements = placer.place(request.text, instances, canvas, png_bytes(canvas_img))
-    image, render_log = render_collage(canvas_img, canvas.horizon_y, [(i, sprites[i.id], p) for i, p in zip(instances, placements)], cfg)
+    water: WaterMap | None = None
+    if judge is not None and any(i.habitat for i in instances):
+        water, wlog = estimate_water_map(judge, canvas_img, canvas.horizon_y)
+        log["water_map"] = {**wlog, "p": water.p.round(2).tolist(), "bbox": water.bbox()}
+        if any(i.habitat == "water" for i in instances) and not water.any_water():
+            log["warnings"].append("水の上に置く物があるが、土台に水が見つからなかった(足元は補正されない)")
+    elif any(i.habitat for i in instances):
+        log["warnings"].append("水・陸の指定がある物があるが、judge がないので水と陸は見ていない")
+    ctx = PlaceContext(base=canvas_img, sprites=sprites, cfg=cfg, water=water)
+    placements = placer.place(request.text, instances, canvas, png_bytes(canvas_img), context=ctx)
+    if getattr(placer, "trace", None):
+        log["placer_trace"] = placer.trace
+    if water is not None:
+        placements, hlog = apply_habitat(instances, placements, water, cfg.limits)
+        log["habitat_corrections"] = hlog
+    image, render_log = render_collage(canvas_img, canvas.horizon_y, [(i, sprites[i.id], p) for i, p in zip(instances, placements)], cfg, foot_ok=foot_ok_for(water))
     log["placements"] = [{"instance": i.id, "x": round(p.x, 4), "y": round(p.y, 4), "scale_mult": round(p.scale_mult, 3), "rotation_deg": round(p.rotation_deg, 2),
                           "x_range80": [round(v, 3) for v in p.x_range80] if p.x_range80 else None,
                           "y_range80": [round(v, 3) for v in p.y_range80] if p.y_range80 else None} for i, p in zip(instances, placements)]

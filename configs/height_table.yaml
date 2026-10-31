@@ -4,47 +4,58 @@
 # 下の値はすべて「仮置き」で、私の一般的な目安。出典はない。使う前に確かめて、
 # 確かめた値は source に出典を書く(source が placeholder のままのものは未確認)。
 # 表にない種類は、実行時に Clairic が実寸を提案する(設計書 R10)。
+# habitat: water(水の上。船など)/ land(陸の上。水に入らない)。水と陸の地図は Clef で作る(pipeline/compose/water.py)。出典のない仮置き。
 entries:
   person:
     mean: 1.7
     sd: 0.1
     source: placeholder
+    habitat: land
   dog:
     mean: 0.5
     sd: 0.15
     source: placeholder
+    habitat: land
   tree:
     mean: 8.0
     sd: 4.0
     source: placeholder
+    habitat: land
   house:
     mean: 6.0
     sd: 2.0
     source: placeholder
+    habitat: land
   # ---- ここから 2026-10-31 に追加(M2/M3 の試作用。すべて仮置きで、私の一般的な目安。出典はない) ----
   horse:
     mean: 1.6
     sd: 0.2
     source: placeholder
+    habitat: land
   cow:
     mean: 1.3
     sd: 0.15
     source: placeholder
+    habitat: land
   sheep:
     mean: 0.8
     sd: 0.1
     source: placeholder
+    habitat: land
   boat:
     width_m: 7.0     # 船は、高さでなく長さ(幅)で大きさを決める。小舟 4〜5m、帆船は 15m 以上(種類で大きく違う。仮置き)
     source: placeholder
+    habitat: water
   tower:
     mean: 15.0
     sd: 5.0
     source: placeholder
+    habitat: land
   column:
     mean: 4.0
     sd: 1.0
     source: placeholder
+    habitat: land
   # 空中の物は、遠近ではなく画面の高さに対する比で大きさを決める(height_frac)
   cloud:
     airborne: true

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -78,8 +79,9 @@ def _transfer_colors(canvas_u8: np.ndarray, color: np.ndarray, alpha: np.ndarray
 
 
 def render_collage(base: Image.Image, horizon_y: float, objects: list[tuple[Instance, np.ndarray, Placement]],
-                   cfg: RenderConfig | None = None) -> tuple[Image.Image, list[dict]]:
-    """objects = (配置する個体, 切り抜き RGBA(uint8)、配置)。奥から手前へ重ねる(R6)。"""
+                   cfg: RenderConfig | None = None, foot_ok: Callable[[Instance, float, float], bool] | None = None) -> tuple[Image.Image, list[dict]]:
+    """objects = (配置する個体, 切り抜き RGBA(uint8)、配置)。奥から手前へ重ねる(R6)。
+    foot_ok(個体, x, y) があれば、重なりを避けて横にずらすとき、足元がそれを満たさない位置(例: 船が陸に乗る)には動かさない。"""
     cfg = cfg or RenderConfig()
     lim = cfg.limits
     canvas = np.asarray(base.convert("RGB")).copy()
@@ -118,9 +120,15 @@ def render_collage(base: Image.Image, horizon_y: float, objects: list[tuple[Inst
             ratio = min(1.0, cfg.max_height_frac * H / h_px, cfg.max_width_frac * W / (h_px * inst.aspect))
             if ratio < 1.0:
                 y_new = max(horizon_y + (y - horizon_y) * ratio, horizon_y + lim.min_ground_gap)
-                rec["corrections"].append({"moved_toward_horizon": [round(y, 4), round(y_new, 4)]})
-                y = y_new
-                h_px = size_at(y)
+                if foot_ok is not None and not foot_ok(inst, x, y_new):
+                    # 奥へ動かすと足元が生息場所(水など)から出る: 足元はそのままにして、倍率で縮める(倍率の下限は無視する)
+                    sm = sm * ratio
+                    rec["corrections"].append({"shrunk_for_habitat": round(sm, 4)})
+                    h_px = size_at(y)
+                else:
+                    rec["corrections"].append({"moved_toward_horizon": [round(y, 4), round(y_new, 4)]})
+                    y = y_new
+                    h_px = size_at(y)
         h_px = max(h_px, cfg.min_height_px)
         sprite = _premult_sprite(rgba, int(round(h_px)), pl.flip)
         sh, sw = sprite.shape[:2]
@@ -165,6 +173,8 @@ def render_collage(base: Image.Image, horizon_y: float, objects: list[tuple[Inst
             for step in cfg.nudge_steps:
                 for sign in (1, -1):
                     cx = float(np.clip(px + sign * step * W, lim.margin_x * W, (1 - lim.margin_x) * W))
+                    if foot_ok is not None and not foot_ok(inst, cx / W, py / H):
+                        continue
                     m2 = _transform(sw, sh, anchor, rot, (cx, py))
                     wp2 = _warp(sprite, m2, (W, H))
                     mk2 = wp2[..., 3] > 0.5

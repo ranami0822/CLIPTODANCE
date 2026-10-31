@@ -10,6 +10,7 @@ import dataclasses
 import hashlib
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Sequence
@@ -42,7 +43,8 @@ class CachedJudge:
         self.capabilities = JudgeCapabilities(max_questions=None, max_images=inner.capabilities.max_images)
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(path)
+        self._db = sqlite3.connect(path, check_same_thread=False)   # 複数のスレッドから呼ばれても使えるように、DB の操作はロックの中で行う
+        self._lock = threading.Lock()
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, payload TEXT NOT NULL, created_at REAL NOT NULL)"
         )
@@ -59,7 +61,8 @@ class CachedJudge:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _load(self, key: str, question: Question) -> JudgeResult | None:
-        row = self._db.execute("SELECT payload FROM cache WHERE key = ?", (key,)).fetchone()
+        with self._lock:
+            row = self._db.execute("SELECT payload FROM cache WHERE key = ?", (key,)).fetchone()
         if row is None:
             return None
         payload = json.loads(row[0])
@@ -67,10 +70,11 @@ class CachedJudge:
 
     def _store(self, key: str, result: JudgeResult) -> None:
         payload = {k: v for k, v in dataclasses.asdict(result).items() if k not in _EXCLUDED_FIELDS}
-        self._db.execute(
-            "INSERT OR REPLACE INTO cache (key, payload, created_at) VALUES (?, ?, ?)",
-            (key, json.dumps(payload, ensure_ascii=False), time.time()),
-        )
+        with self._lock:
+            self._db.execute(
+                "INSERT OR REPLACE INTO cache (key, payload, created_at) VALUES (?, ?, ?)",
+                (key, json.dumps(payload, ensure_ascii=False), time.time()),
+            )
 
     def ask(
         self, questions: Sequence[Question], images: Sequence[ImageInput] = (), state: State = ""
@@ -93,7 +97,8 @@ class CachedJudge:
             for i, result in zip(miss_idx, resp.results):
                 found[i] = result
                 self._store(keys[i], result)
-            self._db.commit()  # 例外が出たときはここに来ない = 失敗は保存されない
+            with self._lock:
+                self._db.commit()  # 例外が出たときはここに来ない = 失敗は保存されない
         return JudgeResponse(
             results=tuple(found[i] for i in range(len(questions))), usage=usage, model_id=self.model_id
         )
