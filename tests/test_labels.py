@@ -271,3 +271,14 @@ def test_compare_and_horizon_work_for_the_claude_labeler(tmp_path):
     i1 = db.get("images", "i1")
     assert i1["horizon_claude_y"] == 0.7 and i1["horizon_ai_y"] is None and i1["horizon_checked"] == 0
     assert labels.evaluate_horizons(db, "p", "claude")["n_labeled"] == 1
+
+
+def test_start_leaves_earlier_numbers_untouched(tmp_path):
+    db = make_db(tmp_path)
+    labels.import_usable(db, "p", [4], start=3, upto=6, source="claude")
+    labels.import_repeat(db, "p", [5], start=3, upto=6, source="claude")
+    rows = db.rows("cutouts")
+    assert [r["usable_claude"] for r in rows] == [None, None, 0, 1, 0, 0]
+    assert [r["repeat_claude"] for r in rows] == [None, None, 0, 0, 1, 0]
+    with pytest.raises(ValueError):
+        labels.import_usable(db, "p", [2], start=3, source="claude")   # start より前の番号は指定できない

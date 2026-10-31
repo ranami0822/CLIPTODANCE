@@ -71,36 +71,39 @@ def role_of(row: dict, source: str = "human") -> str | None:
     return {(1, 1): "both", (1, 0): "single", (0, 1): "repeat", (0, 0): "none"}[(int(u), int(r))]
 
 
-def import_repeat(db: PoolDB, pool: str, repeat_numbers: list[int], upto: int | None = None, source: str = "human") -> dict:
+def import_repeat(db: PoolDB, pool: str, repeat_numbers: list[int], upto: int | None = None, source: str = "human",
+                  start: int = 1) -> dict:
     """番号 1〜upto のうち、repeat_numbers にあるものを「反復して使える」(1)、ほかを 0 にする。
     「単体で使える」の印とは独立している(単体で使えるものも、反復に使える。例: 馬を並べて群れにする)。"""
     rcol = REPEAT_COL[source]
     nums = numbering(db, pool)
     limit = upto if upto is not None else max(nums)
-    unknown = [n for n in repeat_numbers if n not in nums or n > limit]
+    unknown = [n for n in repeat_numbers if n not in nums or n > limit or n < start]
     if unknown:
         raise ValueError(f"範囲外の番号: {unknown}")
     rep = set(repeat_numbers)
-    for n in range(1, limit + 1):
+    for n in range(start, limit + 1):
         db.update("cutouts", nums[n], **{rcol: 1 if n in rep else 0})
     db.commit()
-    return {"covered": limit, "repeat": len(rep)}
+    return {"covered": limit - start + 1, "repeat": len(rep)}
 
 
-def import_usable(db: PoolDB, pool: str, usable_numbers: list[int], upto: int | None = None, source: str = "human") -> dict:
-    """番号 1〜upto(省略時は全部)のうち、usable_numbers にあるものを使える(1)、ほかを使えない(0)にする。
+def import_usable(db: PoolDB, pool: str, usable_numbers: list[int], upto: int | None = None, source: str = "human",
+                  start: int = 1) -> dict:
+    """番号 start〜upto(省略時は 1 と全部)のうち、usable_numbers にあるものを使える(1)、ほかを使えない(0)にする。
+    start より前は触らない(見ていない状態の判断にしたいときに、番号の範囲を区切る)。
     source = "human"(あなたの判断)か "ai"(別のモデルの判断。人の印とは別の列に入れる)。"""
     col = USABLE_COL[source]
     nums = numbering(db, pool)
     limit = upto if upto is not None else max(nums)
-    unknown = [n for n in usable_numbers if n not in nums or n > limit]
+    unknown = [n for n in usable_numbers if n not in nums or n > limit or n < start]
     if unknown:
         raise ValueError(f"範囲外の番号: {unknown}")
     good = set(usable_numbers)
-    for n in range(1, limit + 1):
+    for n in range(start, limit + 1):
         db.update("cutouts", nums[n], **{col: 1 if n in good else 0})
     db.commit()
-    return {"labeled": limit, "usable": len(good), "not_usable": limit - len(good)}
+    return {"labeled": limit - start + 1, "usable": len(good), "not_usable": limit - start + 1 - len(good)}
 
 
 def import_horizons(db: PoolDB, pool: str, values: dict[int, float], not_applicable: list[int], accept_rest: bool = False,

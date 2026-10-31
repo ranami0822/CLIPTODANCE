@@ -162,9 +162,9 @@ def cmd_import_labels(a) -> None:
 
     db = open_db(a.pool)
     if a.usable is not None:
-        print(f"usable({a.source}):", labels.import_usable(db, a.pool, labels.parse_numbers(a.usable), upto=a.upto, source=a.source))
+        print(f"usable({a.source}):", labels.import_usable(db, a.pool, labels.parse_numbers(a.usable), upto=a.upto, source=a.source, start=a.start))
     if a.repeat is not None:
-        print(f"repeat({a.source}):", labels.import_repeat(db, a.pool, labels.parse_numbers(a.repeat), upto=a.upto, source=a.source))
+        print(f"repeat({a.source}):", labels.import_repeat(db, a.pool, labels.parse_numbers(a.repeat), upto=a.upto, source=a.source, start=a.start))
     if a.horizon or a.horizon_na or a.horizon_rest_ok:
         vals = labels.parse_horizon_values(a.horizon) if a.horizon else {}
         na = labels.parse_numbers(a.horizon_na) if a.horizon_na else []
@@ -245,6 +245,7 @@ def main() -> None:
     p = add("import-labels", cmd_import_labels)
     p.add_argument("--usable", help="使える切り抜きの番号。例: 1,3,5-9(ほかは使えない扱い)")
     p.add_argument("--upto", type=int, help="この番号までを判定済みとする(省略時は全部)")
+    p.add_argument("--start", type=int, default=1, help="この番号からを判定済みとする(省略時は 1)。それより前は触らない")
     p.add_argument("--repeat", help="反復素材として使える切り抜きの番号(単体では使えないもののうち)。例: 2,5,9-11")
     p.add_argument("--horizon", help="地平線の正解。例: 3=0.45,5=0.60(画像の番号=高さ、上が0)")
     p.add_argument("--horizon-na", help="地平線のない絵(対象外)の画像の番号。例: 2,7")
