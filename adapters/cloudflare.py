@@ -11,7 +11,8 @@
   - Clairic: body = {model, state, fields, images, ...}。estimate 型は min / max が必須で、
     {value, mean, median, p10, p90, p_below, p_above} を返す(p10〜p90 が 80% 範囲)。
   - 画像: PNG / JPEG / WebP のみ。1枚 4 MiB・16 メガピクセルまで、合計 8 MiB まで。URL は不可。
-  - エラー表: 3036 (429) = 1日の無料枠 10,000 ニューロンを使い切った / 3040 (429) = 一時的な容量不足。
+  - エラー表: 3036 (429) = 1日の無料枠 10,000 ニューロンを使い切った(ドキュメントの表) / 3040 (429) = 一時的な容量不足。
+  - **実測(2026-10-31 14:40 UTC ごろ)**: 無料枠を使い切ったときは code **4006**、HTTP 429、message "you have used up your daily free allocation of 10,000 neurons, please upgrade to Cloudflare's Workers Paid plan..." だった(ドキュメントの 3036 ではない)。
 
 未検証(実際には試していない):
   - 無料枠を使い切ったときの応答の実物(ドキュメントの表のコードに従って割り当てている)。
@@ -63,7 +64,9 @@ _QUESTION_ID_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,100}$")
 _FIELD_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.\-]{0,63}$")
 
 # 公式ドキュメント「Errors」の表
-CODE_BUDGET = 3036
+CODE_BUDGET = 3036            # ドキュメントの表の値
+CODE_BUDGET_OBSERVED = 4006   # 実際に無料枠を使い切ったときに返った値(2026-10-31)
+BUDGET_CODES = (CODE_BUDGET, CODE_BUDGET_OBSERVED)
 CODE_CAPACITY = 3040
 INVALID_REQUEST_CODES = {3003, 3006, 5004, 5006, 5007}  # 5006 は実測(state 省略時)
 
@@ -150,7 +153,7 @@ def raise_for_error(status: int, headers: dict, data: object) -> None:
     first = errors[0] if isinstance(errors, list) and errors and isinstance(errors[0], dict) else {}
     code, message = first.get("code"), str(first.get("message", ""))[:300]
     text = f"HTTP {status} code={code}: {message}"
-    if code == CODE_BUDGET:
+    if code in BUDGET_CODES:
         raise BudgetExceeded(text)
     if status == 429 or code == CODE_CAPACITY:
         retry = headers.get("retry-after")

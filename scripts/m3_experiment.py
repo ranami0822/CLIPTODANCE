@@ -148,6 +148,9 @@ def main() -> None:
     except RuntimeError as e:
         print("土台として使えない:", e, flush=True)
         return
+    except (BudgetExceeded, RateLimited) as e:
+        print("中断(予算かレート制限):", type(e).__name__, e, flush=True)
+        raise SystemExit(3)
     from pipeline.compose.water import WaterMap
     water = WaterMap(p=np.array(probe.log["water_map"]["p"]), horizon_y=probe.log["base"]["horizon_in_canvas"])
     info = {"base": probe.log["base"]["image_id"], "water_bbox": water.bbox(), "water_cells": int(water.mask().sum())}

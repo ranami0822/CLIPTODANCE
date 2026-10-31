@@ -204,6 +204,8 @@ def test_error_codes_map_to_exceptions():
     q = [noul("q", "?")]
     with pytest.raises(BudgetExceeded):  # 3036: 1日の無料枠を使い切った(ドキュメントの表。実物は未検証)
         CloudflareJudge(client_with(err(429, 3036))).ask(q)
+    with pytest.raises(BudgetExceeded):  # 4006: 実際に無料枠を使い切ったときに返った値(2026-10-31 の実測)
+        CloudflareJudge(client_with(err(429, 4006))).ask(q)
     with pytest.raises(RateLimited) as e:  # 3040: 一時的な容量不足
         CloudflareJudge(client_with(err(429, 3040, headers={"retry-after": "3"}))).ask(q)
     assert e.value.retry_after_s == 3.0
