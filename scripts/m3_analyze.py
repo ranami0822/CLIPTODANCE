@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 METRICS = [("habitat_raw_ok", "水陸を守った提案の割合(補正前)"), ("boats_raw_ok", "船が水の上(補正前)"), ("overlap_exceeded", "重なり超過の数"),
-           ("min_dist", "点どうしの最小距離"), ("max_cover", "最大被覆"), ("scale_mean", "倍率の平均"), ("nat_score", "Clef の自然さ(0-4、未検証)")]
+           ("min_dist", "点どうしの最小距離"), ("max_cover", "最大被覆"), ("scale_mean", "倍率の平均"), ("boat_width_frac_max", "船の幅の最大比"), ("height_frac_max", "地上の物の高さの最大比")]
 
 
 def load(root: Path):
@@ -29,7 +29,7 @@ def collapse(rows):
     for (b, v), rs in groups.items():
         row = {"base": b, "variant": v, "rep": 0, "n_runs": len(rs), "final": rs[0]["final"]}
         for k in keys:
-            xs = [r[k] for r in rs if r[k] is not None]
+            xs = [r.get(k) for r in rs if r.get(k) is not None]
             row[k] = float(np.mean(xs)) if xs else None
         out.append(row)
     return out
@@ -54,7 +54,7 @@ def main() -> None:
         rs = [r for r in rows if r["variant"] == v]
         cells = []
         for k, _ in METRICS:
-            xs = [r[k] for r in rs if r[k] is not None]
+            xs = [r.get(k) for r in rs if r.get(k) is not None]
             cells.append(f"{np.mean(xs):.2f}({min(xs):.2f}-{max(xs):.2f})" if xs else "-")
         print(f"{v:20s} {len(rs):3d} " + " ".join(f"{c:>16s}" for c in cells))
     print(f"\n== {a.ref} との差(同じ土台・同じ回どうし。平均差 [増えた回数/減った回数/同じ] )")
@@ -64,7 +64,7 @@ def main() -> None:
             continue
         line = []
         for k, _ in METRICS:
-            d = [r[k] - ref[(r["base"], r["rep"])][k] for r in rows if r["variant"] == v and (r["base"], r["rep"]) in ref and r[k] is not None and ref[(r["base"], r["rep"])][k] is not None]
+            d = [r[k] - ref[(r["base"], r["rep"])][k] for r in rows if r["variant"] == v and (r["base"], r["rep"]) in ref and r.get(k) is not None and ref[(r["base"], r["rep"])].get(k) is not None]
             line.append(f"{np.mean(d):+.2f} [{sum(x > 1e-9 for x in d)}/{sum(x < -1e-9 for x in d)}/{sum(abs(x) <= 1e-9 for x in d)}]" if d else "-")
         print(f"{v:20s} n={sum(1 for r in rows if r['variant']==v and (r['base'], r['rep']) in ref):2d} " + " ".join(f"{c:>20s}" for c in line))
     rows_for_var = raw_rows
@@ -84,7 +84,7 @@ def main() -> None:
         for v in ("rules", "allatonce_nocorr", "seq_full", "seq_nowater_nocorr"):
             rs = [r for r in rows if r["base"] == b and r["variant"] == v]
             if rs:
-                print(f"{b:12s} {v:20s} 水陸{np.mean([r['habitat_raw_ok'] for r in rs]):.2f} 自然さ{np.mean([r['nat_score'] for r in rs]):.2f} 最小距離{np.mean([r['min_dist'] for r in rs]):.2f}")
+                print(f"{b:12s} {v:20s} 水陸{np.mean([r['habitat_raw_ok'] for r in rs]):.2f} 最小距離{np.mean([r['min_dist'] for r in rs]):.2f}")
 
 
 if __name__ == "__main__":

@@ -45,17 +45,25 @@ class ComposeResult:
 
 
 def compose(db: PoolDB, pool: str, embedder: Embedder, placer: Placer, request: ComposeRequest, heights: HeightTable,
-            cfg: RenderConfig | None = None, base_rank: int = 0, judge=None) -> ComposeResult:
+            cfg: RenderConfig | None = None, base_rank: int = 0, judge=None, base_db: PoolDB | None = None, base_pool: str | None = None,
+            base_id: str | None = None) -> ComposeResult:
     """judge(Clef 相当)を渡すと、水と陸の地図を作り、habitat(水・陸)の指定を守るよう足元を直す。渡さなければ、水と陸は見ない。"""
     t0 = time.monotonic()
     cfg = cfg or RenderConfig()
     log: dict = {"request": {"text": request.text, "base_query": request.base_query, "elements": [asdict(e) for e in request.elements]},
                  "placer": placer.name, "warnings": []}
 
-    bases = select_base(db, pool, embedder, request.base_query)
+    # 土台は別のプール(base_db / base_pool)から選べる(開発用と評価用の土台を分けるため)。base_id があれば、その土台を使う(使えなければ失敗)。
+    bases = select_base(base_db or db, base_pool or pool, embedder, request.base_query, top=200 if base_id else 30)
     if not bases:
         raise RuntimeError("土台にできる風景がない(地平線を下の三分の一に置けるものがない)")
-    base = bases[min(base_rank, len(bases) - 1)]
+    if base_id is not None:
+        matches = [b for b in bases if b.row["id"] == base_id]
+        if not matches:
+            raise RuntimeError(f"指定した土台 {base_id} は使えない(地平線がない・窓が作れない・余白が残る、のどれか)")
+        base = matches[0]
+    else:
+        base = bases[min(base_rank, len(bases) - 1)]
     src = Image.open(base.row["work_path"]).convert("RGB")
     canvas_img = render_base(src, base.plan, request.canvas_width)
     canvas = CanvasInfo(width=canvas_img.width, height=canvas_img.height, horizon_y=base.plan.horizon_y, source_image_id=base.row["id"],
@@ -113,5 +121,6 @@ def compose(db: PoolDB, pool: str, embedder: Embedder, placer: Placer, request: 
                           "x_range80": [round(v, 3) for v in p.x_range80] if p.x_range80 else None,
                           "y_range80": [round(v, 3) for v in p.y_range80] if p.y_range80 else None} for i, p in zip(instances, placements)]
     log["render"] = render_log
+    log["render_size"] = [image.width, image.height]
     log["seconds"] = round(time.monotonic() - t0, 1)
     return ComposeResult(image=image, base=canvas_img, log=log)

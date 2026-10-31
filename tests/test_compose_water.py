@@ -354,3 +354,13 @@ def test_the_intent_alone_does_not_say_where_the_water_is():
     SequentialClairicPlacer(est, use_water_hint=False).place("r", [inst("boat", "boat", "water")], canvas_info(), b"", context([inst("boat", "boat", "water")]))
     t = est.calls[0]["text"]
     assert "floats on water" in t and "Water is found at" not in t       # 水の上という意図は伝わるが、場所は伝わらない
+
+
+def test_the_intent_sentence_can_be_removed_for_ablation():
+    insts = [inst("horse", "horse", "land", role="main")]
+    est = FakeEstimator()
+    SequentialClairicPlacer(est, use_intent=False).place("r", insts, canvas_info(), b"", context(insts, water=None))
+    assert "Intent" not in est.calls[0]["text"] and "Now place: horse" in est.calls[0]["text"]
+    est = FakeEstimator()
+    SequentialClairicPlacer(est).place("r", insts, canvas_info(), b"", context(insts, water=None))
+    assert "Intent: " in est.calls[0]["text"]

@@ -174,10 +174,10 @@ class SequentialClairicPlacer:
 
     def __init__(self, estimator: Estimator, limits: Limits | None = None, use_image: bool = True, use_grid: bool = True,
                  use_history: bool = True, use_water_hint: bool = True, order: str = "main_first", seed: int = 0,
-                 water_hint_parts: tuple[str, ...] = ("text", "range")):
+                 water_hint_parts: tuple[str, ...] = ("text", "range"), use_intent: bool = True):
         if order not in self.ORDERS:
             raise ValueError(f"order は {self.ORDERS} のどれか")
-        self.order_mode, self.seed = order, seed
+        self.order_mode, self.seed, self.use_intent = order, seed, use_intent
         if not set(water_hint_parts) <= {"text", "range"}:
             raise ValueError("water_hint_parts は 'text'(水の領域の文章)と 'range'(項目の範囲を水域の箱に絞る)の組")
         self.water_hint_parts = tuple(water_hint_parts) if use_water_hint else ()
@@ -273,7 +273,7 @@ class SequentialClairicPlacer:
                 lines.append(("Already placed:\n" + "\n".join(hist)) if hist else "Nothing is placed yet.")
             if water_note:
                 lines.append(water_note)
-            lines.append(f"Now place: {sid}, a {inst.spec.name}, {kind}, role={inst.spec.role}. Intent: {intent}.")
+            lines.append(f"Now place: {sid}, a {inst.spec.name}, {kind}, role={inst.spec.role}." + (f" Intent: {intent}." if self.use_intent else ""))
             lines.append("Choose a spot that keeps the whole collage balanced and does not overlap objects already placed.")
             state = "\n".join(lines)
             imgs = []

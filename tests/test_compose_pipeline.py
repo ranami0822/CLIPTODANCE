@@ -243,3 +243,15 @@ def test_rule_placer_puts_wide_objects_such_as_boats_farther_so_their_width_fits
     out = RuleBasedPlacer().place("t", [boat], canvas(), b"")
     width_px = ground_height_px(7.0, out[0].y, 2 / 3, 400)       # 画面 600x400 での幅(画素)
     assert width_px <= 0.26 * 600 and out[0].y < 0.80
+
+
+def test_compose_can_take_the_base_from_another_pool_and_by_id(tmp_path):
+    base_db = PoolDB(tmp_path / "base.sqlite")
+    img, _, _ = landscape_array()
+    ingest_image(base_db, tmp_path / "bp", "bpool", make_item("b1"), jpeg_bytes(img), FakeSegmenter(), FakeEmbedder(), IngestConfig())
+    db = build_pool(tmp_path)
+    res = compose(db, "test", FakeEmbedder(), RuleBasedPlacer(), request(), HEIGHTS, RenderConfig(color_strength=0.0),
+                  base_db=base_db, base_pool="bpool", base_id="test-b1")
+    assert res.log["base"]["image_id"] == "test-b1" and [c["cutout_id"] for c in res.log["cutouts"]] == ["test-1-c00", "test-1-c01"]   # 土台は別のプール、切り抜きは元のプール
+    with pytest.raises(RuntimeError):
+        compose(db, "test", FakeEmbedder(), RuleBasedPlacer(), request(), HEIGHTS, RenderConfig(color_strength=0.0), base_db=base_db, base_pool="bpool", base_id="nope")
