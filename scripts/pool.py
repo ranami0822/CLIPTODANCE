@@ -185,8 +185,9 @@ def cmd_eval(a) -> None:
         print(f"  {f['feature']:24s} AUC={f['auc']:.3f} ({f['direction']}) 強さ={f['strength']:.2f} n={f['n']}")
     if "roles" in c:
         print(f"  役割の内訳: {c['roles']}")
-    for f in c.get("features_single_or_repeat", [])[:8]:
-        print(f"  [単体か反復 vs 使えない] {f['feature']:24s} AUC={f['auc']:.3f} ({f['direction']}) n={f['n']}")
+    for label, key in (("反復して使える", "features_repeat"), ("単体か反復で使える", "features_single_or_repeat")):
+        for f in c.get(key, [])[:6]:
+            print(f"  [{label}] {f['feature']:24s} AUC={f['auc']:.3f} ({f['direction']}) n={f['n']}")
     for k in ("clef_rule_single_object>0.5", "clef_rule_single>0.5_and_cutoff<0.5"):
         if k in c:
             print(f"  {k}: {c[k]}")

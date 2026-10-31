@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS cutouts (
     embedding BLOB, embedding_model TEXT,             -- 切り抜きの埋め込み(検索用)
     attrs TEXT, judge_version TEXT,
     usable INTEGER,                                   -- 人の判定: 1 = 単体でそのまま使える、0 = 単体では使えない、NULL = 未判定
-    repeat INTEGER,                                   -- usable = 0 のうち 1 = 反復素材として使える(繁み・雲・布など)、0 = 使えない
+    repeat INTEGER,                                   -- 人の判定: 1 = 反復して使える(繁み・雲・布、馬の群れなど)。usable とは独立
     usable_ai INTEGER, repeat_ai INTEGER,             -- AI(別のモデル)の判定。人の判定とは混ぜない
     created_at REAL NOT NULL
 );

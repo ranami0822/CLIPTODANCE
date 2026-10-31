@@ -59,40 +59,31 @@ def save_numbering(path: Path, cutouts: dict[int, str], images: dict[int, str]) 
 
 USABLE_COL = {"human": "usable", "ai": "usable_ai"}
 REPEAT_COL = {"human": "repeat", "ai": "repeat_ai"}
-ROLES = ("single", "repeat", "none")  # 単体でそのまま使える / 反復素材として使える / 使えない
+ROLES = ("both", "single", "repeat", "none")  # 単体でも反復でも使える / 単体だけ / 反復だけ / 使えない
 
 
 def role_of(row: dict, source: str = "human") -> str | None:
-    """切り抜きの役割。印が付いていなければ None。反復素材の印がまだなら、使えないものは None(区別できない)。"""
+    """切り抜きの役割。「単体で使える」と「反復して使える」は独立した2つの印で、両方が付いているときだけ決まる。"""
     u, r = row.get(USABLE_COL[source]), row.get(REPEAT_COL[source])
-    if u is None:
+    if u is None or r is None:
         return None
-    if u == 1:
-        return "single"
-    return None if r is None else ("repeat" if r == 1 else "none")
+    return {(1, 1): "both", (1, 0): "single", (0, 1): "repeat", (0, 0): "none"}[(int(u), int(r))]
 
 
 def import_repeat(db: PoolDB, pool: str, repeat_numbers: list[int], upto: int | None = None, source: str = "human") -> dict:
-    """「単体では使えない」と印を付けた切り抜きのうち、反復素材として使えるものを印す。
-    1〜upto の番号は、すでに usable の印が付いている必要がある。単体で使えると印したものは、反復素材にできない(排他的な3段階)。"""
-    ucol, rcol = USABLE_COL[source], REPEAT_COL[source]
+    """番号 1〜upto のうち、repeat_numbers にあるものを「反復して使える」(1)、ほかを 0 にする。
+    「単体で使える」の印とは独立している(単体で使えるものも、反復に使える。例: 馬を並べて群れにする)。"""
+    rcol = REPEAT_COL[source]
     nums = numbering(db, pool)
     limit = upto if upto is not None else max(nums)
     unknown = [n for n in repeat_numbers if n not in nums or n > limit]
     if unknown:
         raise ValueError(f"範囲外の番号: {unknown}")
-    rows = {n: db.get("cutouts", nums[n]) for n in range(1, limit + 1)}
-    unlabeled = [n for n, r in rows.items() if r[ucol] is None]
-    if unlabeled:
-        raise ValueError(f"先に「使える」の印が必要: {unlabeled[:10]}")
-    clash = [n for n in repeat_numbers if rows[n][ucol] == 1]
-    if clash:
-        raise ValueError(f"単体で使えると印した切り抜きは、反復素材にできない(3段階は排他的): {clash}")
     rep = set(repeat_numbers)
     for n in range(1, limit + 1):
-        db.update("cutouts", nums[n], **{rcol: 1 if n in rep else 0} if rows[n][ucol] == 0 else {rcol: None})
+        db.update("cutouts", nums[n], **{rcol: 1 if n in rep else 0})
     db.commit()
-    return {"covered": limit, "repeat": len(rep), "none": sum(1 for n in range(1, limit + 1) if rows[n][ucol] == 0) - len(rep)}
+    return {"covered": limit, "repeat": len(rep)}
 
 
 def import_usable(db: PoolDB, pool: str, usable_numbers: list[int], upto: int | None = None, source: str = "human") -> dict:
@@ -180,27 +171,22 @@ def evaluate_cutouts(db: PoolDB, pool: str, source: str = "human") -> dict:
     out["roles"] = {k: sum(1 for x in roles if x == k) for k in ROLES} | {"repeat_unlabeled": sum(1 for x in roles if x is None)}
     y = [bool(r[col]) for r in rows]
     feats = [_features(r) for r in rows]
-    table = []
-    for name in sorted({k for f in feats for k in f}):
-        idx = [i for i, f in enumerate(feats) if f.get(name) is not None]
-        a = auc([feats[i][name] for i in idx], [y[i] for i in idx]) if idx else None
-        if a is not None:
-            table.append({"feature": name, "n": len(idx), "auc": round(a, 3), "direction": "高いほど使える" if a >= 0.5 else "低いほど使える",
-                          "strength": round(abs(a - 0.5) * 2, 3)})
-    out["features"] = sorted(table, key=lambda t: -t["strength"])
 
-    # 「使える(単体か反復)」と「使えない」の区別。反復素材の印が付いている切り抜きだけで測る
-    known = [(i, x) for i, x in enumerate(roles) if x is not None]
-    if known and any(x == "repeat" for _, x in known):
-        yy = [x != "none" for _, x in known]
-        t2 = []
+    def feature_table(target: list[bool], row_idx: list[int]) -> list[dict]:
+        table = []
         for name in sorted({k for f in feats for k in f}):
-            idx = [(j, i) for j, (i, _) in enumerate(known) if feats[i].get(name) is not None]
-            a = auc([feats[i][name] for _, i in idx], [yy[j] for j, _ in idx]) if idx else None
+            idx = [(j, i) for j, i in enumerate(row_idx) if feats[i].get(name) is not None]
+            a = auc([feats[i][name] for _, i in idx], [target[j] for j, _ in idx]) if idx else None
             if a is not None:
-                t2.append({"feature": name, "n": len(idx), "auc": round(a, 3), "direction": "高いほど使える" if a >= 0.5 else "低いほど使える",
-                           "strength": round(abs(a - 0.5) * 2, 3)})
-        out["features_single_or_repeat"] = sorted(t2, key=lambda t: -t["strength"])
+                table.append({"feature": name, "n": len(idx), "auc": round(a, 3), "direction": "高いほど使える" if a >= 0.5 else "低いほど使える",
+                              "strength": round(abs(a - 0.5) * 2, 3)})
+        return sorted(table, key=lambda t: -t["strength"])
+
+    out["features"] = feature_table(y, list(range(len(rows))))  # 「単体で使える」の予測
+    rep_rows = [i for i, r in enumerate(rows) if r[REPEAT_COL[source]] is not None]
+    if rep_rows and any(rows[i][REPEAT_COL[source]] == 1 for i in rep_rows):
+        out["features_repeat"] = feature_table([bool(rows[i][REPEAT_COL[source]]) for i in rep_rows], rep_rows)
+        out["features_single_or_repeat"] = feature_table([bool(rows[i][col] or rows[i][REPEAT_COL[source]]) for i in rep_rows], rep_rows)
 
     judged = [(r, f) for r, f in zip(rows, feats) if f.get("clef:single_object") is not None]
     if judged:
@@ -261,15 +247,14 @@ def compare_labelers(db: PoolDB, pool: str) -> dict:
             "ai_precision": round(tp / (tp + fp), 3) if tp + fp else None, "ai_recall": round(tp / (tp + fn), 3) if tp + fn else None,
             "tp": tp, "fp": fp, "fn": fn, "tn": tn, "human_usable_rate": round((tp + fn) / n, 3),
         })
-    three = [(role_of(r, "human"), role_of(r, "ai")) for r in db.rows("cutouts", "pool = ?", (pool,))]
-    three = [(h, a) for h, a in three if h is not None and a is not None]
-    if three:
-        n = len(three)
-        conf = {h: {a: sum(1 for x, y in three if x == h and y == a) for a in ROLES} for h in ROLES}
-        po = sum(conf[k][k] for k in ROLES) / n
-        pe = sum(sum(conf[k].values()) * sum(conf[h][k] for h in ROLES) for k in ROLES) / n ** 2
-        out["roles_3class"] = {"n": n, "agreement": round(po, 3), "kappa": round((po - pe) / (1 - pe), 3) if pe < 1 else None,
-                               "confusion(行=人, 列=AI)": conf}
+    rrows = db.rows("cutouts", "pool = ? AND repeat IS NOT NULL AND repeat_ai IS NOT NULL", (pool,))
+    if rrows:
+        tp = sum(1 for r in rrows if r["repeat_ai"] and r["repeat"]); fp = sum(1 for r in rrows if r["repeat_ai"] and not r["repeat"])
+        fn = sum(1 for r in rrows if not r["repeat_ai"] and r["repeat"]); tn = sum(1 for r in rrows if not r["repeat_ai"] and not r["repeat"])
+        n = len(rrows); po = (tp + tn) / n; pe = ((tp + fp) * (tp + fn) + (fn + tn) * (fp + tn)) / n ** 2
+        out["repeat"] = {"n": n, "agreement": round(po, 3), "kappa": round((po - pe) / (1 - pe), 3) if pe < 1 else None,
+                         "ai_precision": round(tp / (tp + fp), 3) if tp + fp else None, "ai_recall": round(tp / (tp + fn), 3) if tp + fn else None,
+                         "tp": tp, "fp": fp, "fn": fn, "tn": tn, "human_repeat_rate": round((tp + fn) / n, 3)}
     imgs = db.rows("images", "pool = ?", (pool,))
     both = [r for r in imgs if r["horizon_checked"] == 1 and r["horizon_ai_y"] is not None]
     na_pairs = [r for r in imgs if r["horizon_checked"] in (1, 2) and (r["horizon_ai_na"] is not None)]
