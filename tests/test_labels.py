@@ -190,3 +190,55 @@ def test_compare_horizon_values_and_na(tmp_path):
     h = labels.compare_labelers(db, "p")["horizon"]
     assert h["n_values"] == 1 and h["mean_abs_error"] == pytest.approx(0.08, abs=1e-3) and h["within_0.10"] == 1 and h["within_0.05"] == 0
     assert h["na_agreement"] == 1.0
+
+
+# ---------------------------------------------------------------- 3段階(単体 / 反復素材 / 使えない)
+
+def test_import_repeat_marks_only_among_not_single_and_defines_roles(tmp_path):
+    db = make_db(tmp_path)
+    labels.import_usable(db, "p", [1, 2], upto=6)          # 単体: 1, 2
+    out = labels.import_repeat(db, "p", [3, 5], upto=6)    # 反復: 3, 5。残り 4, 6 は使えない
+    assert out == {"covered": 6, "repeat": 2, "none": 2}
+    assert [labels.role_of(r) for r in db.rows("cutouts")] == ["single", "single", "repeat", "none", "repeat", "none"]
+    assert [r["repeat"] for r in db.rows("cutouts")] == [None, None, 1, 0, 1, 0]   # 単体の行は反復の印を持たない
+
+
+def test_import_repeat_rejects_single_items_unlabeled_items_and_bad_numbers(tmp_path):
+    db = make_db(tmp_path)
+    with pytest.raises(ValueError):
+        labels.import_repeat(db, "p", [1])                 # 先に「使える」の印が必要
+    labels.import_usable(db, "p", [1, 2], upto=3)
+    with pytest.raises(ValueError):
+        labels.import_repeat(db, "p", [1], upto=3)         # 単体で使える印のものは反復にできない
+    with pytest.raises(ValueError):
+        labels.import_repeat(db, "p", [5], upto=3)         # upto の外
+    with pytest.raises(ValueError):
+        labels.import_repeat(db, "p", [], upto=6)          # 4〜6 に「使える」の印がない
+
+
+def test_role_is_unknown_until_repeat_is_labeled(tmp_path):
+    db = make_db(tmp_path)
+    labels.import_usable(db, "p", [1], upto=3)
+    assert [labels.role_of(r) for r in db.rows("cutouts")[:3]] == ["single", None, None]  # 使えない側は、反復かどうか未定
+
+
+def test_evaluate_reports_role_counts_and_single_or_repeat_features(tmp_path):
+    db = make_db(tmp_path)
+    labels.import_usable(db, "p", [5, 6])           # 単体: 5, 6
+    labels.import_repeat(db, "p", [3, 4])           # 反復: 3, 4。1, 2 は使えない
+    res = labels.evaluate_cutouts(db, "p")
+    assert res["roles"] == {"single": 2, "repeat": 2, "none": 2, "repeat_unlabeled": 0}
+    by = {f["feature"]: f for f in res["features_single_or_repeat"]}
+    assert by["area_ratio"]["auc"] == 1.0           # 面積比が大きいほど(k が大きいほど)単体か反復になる
+    single_only = {f["feature"]: f for f in res["features"]}
+    assert single_only["area_ratio"]["auc"] == 1.0
+
+
+def test_compare_three_class_agreement_and_kappa(tmp_path):
+    db = make_db(tmp_path)
+    labels.import_usable(db, "p", [1, 2], source="human"); labels.import_repeat(db, "p", [3, 4], source="human")   # 人: s s r r n n
+    labels.import_usable(db, "p", [1, 3], source="ai"); labels.import_repeat(db, "p", [2, 4], source="ai")         # AI: s r s r n n
+    c = labels.compare_labelers(db, "p")["roles_3class"]
+    assert c["n"] == 6 and c["agreement"] == pytest.approx(4 / 6, abs=1e-3)
+    assert c["confusion(行=人, 列=AI)"]["single"] == {"single": 1, "repeat": 1, "none": 0}
+    assert c["kappa"] == pytest.approx(0.5, abs=1e-3)   # po=4/6, pe=(2*2+2*2+2*2)/36=1/3 → (0.667-0.333)/0.667

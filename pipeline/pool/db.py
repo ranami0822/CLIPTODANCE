@@ -45,8 +45,9 @@ CREATE TABLE IF NOT EXISTS cutouts (
     mask_quality REAL,                                -- SAM の予測 IoU × 安定度
     embedding BLOB, embedding_model TEXT,             -- 切り抜きの埋め込み(検索用)
     attrs TEXT, judge_version TEXT,
-    usable INTEGER,                                   -- 人の判定(1 = 使える、0 = 使えない、NULL = 未判定)
-    usable_ai INTEGER,                                -- AI(別のモデル)の判定。人の判定とは混ぜない
+    usable INTEGER,                                   -- 人の判定: 1 = 単体でそのまま使える、0 = 単体では使えない、NULL = 未判定
+    repeat INTEGER,                                   -- usable = 0 のうち 1 = 反復素材として使える(繁み・雲・布など)、0 = 使えない
+    usable_ai INTEGER, repeat_ai INTEGER,             -- AI(別のモデル)の判定。人の判定とは混ぜない
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS cutouts_image ON cutouts(image_id);
@@ -57,7 +58,8 @@ _JSON_COLS = {"attrs", "meta", "crop_box"}
 # 後から足した列(古い DB に ALTER TABLE で足す)
 _ADDED_COLUMNS = [("images", "crop_box", "TEXT"), ("cutouts", "aspect", "REAL"), ("cutouts", "thickness", "REAL"),
                   ("images", "horizon_auto_y", "REAL"), ("cutouts", "usable", "INTEGER"),
-                  ("cutouts", "usable_ai", "INTEGER"), ("images", "horizon_ai_y", "REAL"), ("images", "horizon_ai_na", "INTEGER")]
+                  ("cutouts", "usable_ai", "INTEGER"), ("images", "horizon_ai_y", "REAL"), ("images", "horizon_ai_na", "INTEGER"),
+                  ("cutouts", "repeat", "INTEGER"), ("cutouts", "repeat_ai", "INTEGER")]
 
 
 def vec_to_blob(vec: np.ndarray) -> bytes:

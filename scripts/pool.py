@@ -163,6 +163,8 @@ def cmd_import_labels(a) -> None:
     db = open_db(a.pool)
     if a.usable is not None:
         print(f"usable({a.source}):", labels.import_usable(db, a.pool, labels.parse_numbers(a.usable), upto=a.upto, source=a.source))
+    if a.repeat is not None:
+        print(f"repeat({a.source}):", labels.import_repeat(db, a.pool, labels.parse_numbers(a.repeat), upto=a.upto, source=a.source))
     if a.horizon or a.horizon_na or a.horizon_rest_ok:
         vals = labels.parse_horizon_values(a.horizon) if a.horizon else {}
         na = labels.parse_numbers(a.horizon_na) if a.horizon_na else []
@@ -181,6 +183,10 @@ def cmd_eval(a) -> None:
     print(f"[切り抜き] 判定済み {c['n_labeled']} 個(使える {c.get('n_usable', 0)} 個)")
     for f in c.get("features", [])[:12]:
         print(f"  {f['feature']:24s} AUC={f['auc']:.3f} ({f['direction']}) 強さ={f['strength']:.2f} n={f['n']}")
+    if "roles" in c:
+        print(f"  役割の内訳: {c['roles']}")
+    for f in c.get("features_single_or_repeat", [])[:8]:
+        print(f"  [単体か反復 vs 使えない] {f['feature']:24s} AUC={f['auc']:.3f} ({f['direction']}) n={f['n']}")
     for k in ("clef_rule_single_object>0.5", "clef_rule_single>0.5_and_cutoff<0.5"):
         if k in c:
             print(f"  {k}: {c[k]}")
@@ -238,6 +244,7 @@ def main() -> None:
     p = add("import-labels", cmd_import_labels)
     p.add_argument("--usable", help="使える切り抜きの番号。例: 1,3,5-9(ほかは使えない扱い)")
     p.add_argument("--upto", type=int, help="この番号までを判定済みとする(省略時は全部)")
+    p.add_argument("--repeat", help="反復素材として使える切り抜きの番号(単体では使えないもののうち)。例: 2,5,9-11")
     p.add_argument("--horizon", help="地平線の正解。例: 3=0.45,5=0.60(画像の番号=高さ、上が0)")
     p.add_argument("--horizon-na", help="地平線のない絵(対象外)の画像の番号。例: 2,7")
     p.add_argument("--horizon-rest-ok", action="store_true", help="上のどちらにも挙げなかった画像は、自動の線で良いものとして確認済みにする")
